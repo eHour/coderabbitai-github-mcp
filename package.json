@@ -1,0 +1,55 @@
+{
+  "name": "mcp-coderabbit",
+  "version": "1.0.0",
+  "description": "MCP server for automating CodeRabbit PR review resolution with parallel agent architecture",
+  "main": "dist/server.js",
+  "type": "module",
+  "bin": {
+    "mcp-coderabbit": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "cli": "tsx src/cli.ts",
+    "lint": "eslint src/**/*.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "keywords": [
+    "mcp",
+    "coderabbit",
+    "github",
+    "pr-review",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "@octokit/graphql": "^5.0.6",
+    "@octokit/rest": "^20.0.2",
+    "@types/uuid": "^10.0.0",
+    "async-mutex": "^0.4.0",
+    "commander": "^12.0.0",
+    "diff": "^5.1.0",
+    "dotenv": "^16.3.1",
+    "eventemitter3": "^5.0.1",
+    "openai": "^4.28.0",
+    "p-queue": "^7.4.1",
+    "simple-git": "^3.22.0",
+    "uuid": "^11.1.0",
+    "winston": "^3.11.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.0.8",
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,0 +1,221 @@
+import OpenAI from 'openai';
+import { Logger } from '../lib/logger.js';
+import { ValidationResult } from '../types/index.js';
+export class ThreadAnalyzerAgent {
+    workerId;
+    messageBus;
+    config;
+    logger;
+    openai;
+    constructor(workerId, messageBus, _stateManager, config) {
+        this.workerId = workerId;
+        this.messageBus = messageBus;
+        this.config = config;
+        this.logger = new Logger(`Analyzer-${workerId}`);
+        // Initialize LLM client if configured
+        if (config.validation.llm?.provider === 'openai' && process.env.OPENAI_API_KEY) {
+            this.openai = new OpenAI({
+                apiKey: process.env.OPENAI_API_KEY,
+            });
+        }
+        this.setupMessageHandlers();
+    }
+    setupMessageHandlers() {
+        this.messageBus.subscribe(`analyzer-${this.workerId}`, async (message) => {
+            if (message.type === 'ANALYZE_THREAD') {
+                const result = await this.analyzeThread(message.payload.thread, message.payload.repo, message.payload.prNumber);
+                this.messageBus.respond(message, result);
+            }
+        });
+    }
+    async analyzeThread(thread, _repo, _prNumber) {
+        this.logger.info(`Analyzing thread ${thread.id}`);
+        try {
+            // Extract the CodeRabbit suggestion
+            const suggestion = this.extractSuggestion(thread);
+            // First, try heuristics
+            const heuristicResult = this.applyHeuristics(suggestion, thread);
+            if (heuristicResult) {
+                this.logger.info(`Thread ${thread.id} matched heuristic: ${heuristicResult.result}`);
+                return heuristicResult;
+            }
+            // If LLM is available, use it
+            if (this.openai && this.config.validation.llm) {
+                return await this.validateWithLLM(thread, suggestion);
+            }
+            // Default to needs review if no validation method available
+            return {
+                threadId: thread.id,
+                result: ValidationResult.NEEDS_REVIEW,
+                confidence: 0.5,
+                reasoning: 'No validation method available',
+            };
+        }
+        catch (error) {
+            this.logger.error(`Failed to analyze thread ${thread.id}`, error);
+            return {
+                threadId: thread.id,
+                result: ValidationResult.UNPATCHABLE,
+                confidence: 0,
+                reasoning: 'Analysis failed',
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+    extractSuggestion(thread) {
+        const body = thread.body;
+        // Extract suggestion type (e.g., "Consider", "Suggestion", "Critical")
+        const typeMatch = body.match(/^(?:\*\*)?(\w+)(?:\*\*)?:/);
+        const type = typeMatch ? typeMatch[1].toLowerCase() : 'suggestion';
+        // Extract code blocks
+        const codeMatch = body.match(/```[\s\S]*?```/g);
+        const code = codeMatch ? codeMatch[0] : undefined;
+        return {
+            type,
+            description: body,
+            code,
+            file: thread.path,
+            line: thread.line,
+        };
+    }
+    applyHeuristics(suggestion, thread) {
+        const { autoAccept, autoReject } = this.config.validation;
+        // Check auto-accept patterns
+        for (const pattern of autoAccept) {
+            if (this.matchesPattern(suggestion, pattern)) {
+                return {
+                    threadId: thread.id,
+                    result: ValidationResult.VALID,
+                    confidence: 1.0,
+                    reasoning: `Matches auto-accept pattern: ${pattern}`,
+                    patch: this.generatePatchFromSuggestion(suggestion),
+                };
+            }
+        }
+        // Check auto-reject patterns
+        for (const pattern of autoReject) {
+            if (this.matchesPattern(suggestion, pattern)) {
+                return {
+                    threadId: thread.id,
+                    result: ValidationResult.INVALID,
+                    confidence: 1.0,
+                    reasoning: `Matches auto-reject pattern: ${pattern}`,
+                };
+            }
+        }
+        // Check for generated/binary files
+        if (suggestion.file) {
+            const rejectExtensions = ['.min.js', '.bundle.js', '.map', '.lock'];
+            if (rejectExtensions.some(ext => suggestion.file.endsWith(ext))) {
+                return {
+                    threadId: thread.id,
+                    result: ValidationResult.INVALID,
+                    confidence: 1.0,
+                    reasoning: 'Generated or binary file',
+                };
+            }
+        }
+        // Security issues are always valid
+        if (suggestion.type === 'critical' ||
+            suggestion.description.toLowerCase().includes('security') ||
+            suggestion.description.toLowerCase().includes('vulnerability')) {
+            return {
+                threadId: thread.id,
+                result: ValidationResult.VALID,
+                confidence: 0.9,
+                reasoning: 'Security/critical issue',
+                patch: this.generatePatchFromSuggestion(suggestion),
+            };
+        }
+        return null;
+    }
+    matchesPattern(suggestion, pattern) {
+        // Simple glob pattern matching with ReDoS protection
+        if (pattern.includes('*')) {
+            // Escape all special regex characters first
+            const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Then convert escaped asterisks to wildcards
+            const safePattern = escapedPattern.replace(/\\\*/g, '.*');
+            const regex = new RegExp(safePattern);
+            return regex.test(suggestion.type) ||
+                regex.test(suggestion.description) ||
+                (suggestion.file ? regex.test(suggestion.file) : false);
+        }
+        return suggestion.type.includes(pattern) ||
+            suggestion.description.includes(pattern) ||
+            (suggestion.file?.includes(pattern) ?? false);
+    }
+    async validateWithLLM(thread, suggestion) {
+        if (!this.openai || !this.config.validation.llm) {
+            throw new Error('LLM not configured');
+        }
+        const prompt = `
+You are a code review validator. Analyze this CodeRabbit suggestion and determine if it's valid.
+
+File: ${suggestion.file}
+Line: ${suggestion.line}
+Suggestion: ${suggestion.description}
+${suggestion.code ? `Suggested code:\n${suggestion.code}` : ''}
+
+Consider:
+1. Is this a real issue or false positive?
+2. Would fixing this improve the code?
+3. Could the fix introduce bugs?
+4. Is the suggestion clear and actionable?
+
+Respond with JSON:
+{
+  "valid": boolean,
+  "confidence": number (0-1),
+  "reasoning": "string",
+  "patch": "unified diff string if valid, null otherwise"
+}`;
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: this.config.validation.llm.model,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: this.config.validation.llm.temperature,
+                response_format: { type: 'json_object' },
+            });
+            const result = JSON.parse(response.choices[0].message.content || '{}');
+            const validationResult = result.confidence < this.config.validation.llm.confidenceThreshold
+                ? ValidationResult.NEEDS_REVIEW
+                : result.valid === true
+                    ? ValidationResult.VALID
+                    : ValidationResult.INVALID;
+            return {
+                threadId: thread.id,
+                result: validationResult,
+                confidence: result.confidence,
+                reasoning: result.reasoning,
+                patch: result.patch,
+            };
+        }
+        catch (error) {
+            this.logger.error('LLM validation failed', error);
+            return {
+                threadId: thread.id,
+                result: ValidationResult.NEEDS_REVIEW,
+                confidence: 0,
+                reasoning: 'LLM validation failed',
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+    generatePatchFromSuggestion(suggestion) {
+        if (!suggestion.code) {
+            return undefined;
+        }
+        // Extract diff from code block if it's already a diff
+        if (suggestion.code.includes('```diff')) {
+            return suggestion.code
+                .replace(/```diff\n?/, '')
+                .replace(/```$/, '')
+                .trim();
+        }
+        // Otherwise, try to generate a simple patch
+        // This is a simplified version - real implementation would need more context
+        return undefined;
+    }
+}
+//# sourceMappingURL=thread-analyzer.js.map

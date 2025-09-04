@@ -1,0 +1,34 @@
+{
+  "parallelism": {
+    "maxAnalyzers": 5,
+    "threadTimeout": 30000,
+    "batchSize": 10
+  },
+  "validation": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4-turbo",
+      "temperature": 0.2,
+      "confidenceThreshold": 0.7
+    },
+    "autoAccept": [
+      "security/*",
+      "bug/*",
+      "critical/*",
+      "vulnerability/*"
+    ],
+    "autoReject": [
+      "*.min.js",
+      "*.bundle.js",
+      "generated/*",
+      "*.lock",
+      "dist/*",
+      "build/*"
+    ],
+    "conventions": "./coding-standards.md"
+  },
+  "ci": {
+    "waitTimeout": 600000,
+    "checkInterval": 10000
+  }
+}
