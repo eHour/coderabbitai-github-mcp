@@ -72,6 +72,15 @@ program
       });
 
       // Load config
+      // Basic input validation
+      const repoPattern = /^[\w-]+\/[\w.-]+$/;
+      if (!repoPattern.test(options.repo)) {
+        throw new Error('Invalid --repo format. Expected owner/name');
+      }
+      if (!Number.isInteger(options.pr) || options.pr <= 0) {
+        throw new Error('Invalid --pr. Must be a positive integer');
+      }
+
       const config = loadConfig();
       validateGitHubToken(config);
 

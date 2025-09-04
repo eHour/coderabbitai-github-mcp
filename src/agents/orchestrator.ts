@@ -391,6 +391,19 @@ export class OrchestratorAgent {
               );
             }
           }
+        } else {
+          const errMsg = patchResults.error || 'Failed to apply patches';
+          this.logger.warn(errMsg);
+          result.errors.push(errMsg);
+          // Mark as needs review since patch couldn't be applied
+          for (const fix of validFixes) {
+            await this.githubAgent.postComment(
+              repo,
+              prNumber,
+              fix.threadId,
+              `@coderabbitai I could not apply the suggested patch: ${errMsg}. Please provide an updated diff.`
+            );
+          }
         }
       } else if (dryRun && validFixes.length > 0) {
         this.logger.dryRun('apply fixes', { count: validFixes.length });
