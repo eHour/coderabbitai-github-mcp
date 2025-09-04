@@ -4,6 +4,13 @@
     "threadTimeout": 30000,
     "batchSize": 10
   },
+  "rateLimit": {
+    "maxRequestsPerHour": 50,
+    "maxRequestsPerMinute": 10,
+    "maxConcurrent": 3,
+    "backoffMultiplier": 2,
+    "maxBackoffMs": 300000
+  },
   "validation": {
     "llm": {
       "provider": "openai",

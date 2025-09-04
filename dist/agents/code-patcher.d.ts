@@ -17,7 +17,6 @@ export declare class CodePatcherAgent {
     private applyPatch;
     private extractFilePathFromPatch;
     private applyUnifiedDiff;
-    private applyHunk;
     commitAndPush(_repo: string, _prNumber: number, message: string): Promise<string>;
     revertCommit(_repo: string, commitSha: string): Promise<void>;
     checkoutBranch(branchName: string, baseBranch?: string): Promise<void>;

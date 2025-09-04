@@ -71,6 +71,13 @@ export interface Config {
         threadTimeout: number;
         batchSize: number;
     };
+    rateLimit?: {
+        maxRequestsPerHour: number;
+        maxRequestsPerMinute: number;
+        maxConcurrent: number;
+        backoffMultiplier: number;
+        maxBackoffMs: number;
+    };
     validation: {
         llm?: {
             provider: 'openai' | 'anthropic';

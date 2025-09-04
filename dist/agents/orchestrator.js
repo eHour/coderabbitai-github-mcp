@@ -40,7 +40,84 @@ export class OrchestratorAgent {
             this.logger.debug(`Received message: ${message.type}`);
         });
     }
-    async run(repo, prNumber, maxIterations = 3, dryRun = false) {
+    getRateLimitStatus() {
+        return this.githubAgent.getRateLimitStatus();
+    }
+    async getUnresolvedThreads(repo, prNumber, page = 1, pageSize = 10) {
+        try {
+            console.error('DEBUG Orchestrator: Start getUnresolvedThreads');
+            // Validate and constrain pageSize
+            pageSize = Math.min(Math.max(1, pageSize || 10), 50);
+            page = Math.max(1, page || 1);
+            console.error('DEBUG Orchestrator: Calling listReviewThreads');
+            const allThreads = await this.githubAgent.listReviewThreads(repo, prNumber, true);
+            console.error('DEBUG Orchestrator: Got threads, filtering for coderabbitai');
+            const coderabbitThreads = allThreads.threads.filter(t => t.author.login === 'coderabbitai');
+            // Apply pagination to CodeRabbit threads
+            const startIndex = (page - 1) * pageSize;
+            const endIndex = startIndex + pageSize;
+            const paginatedThreads = coderabbitThreads.slice(startIndex, endIndex);
+            console.error('DEBUG Orchestrator: Mapping threads');
+            const threads = paginatedThreads.map(thread => ({
+                id: thread.id,
+                path: thread.path,
+                line: thread.line,
+                body: thread.body,
+                createdAt: thread.createdAt,
+                suggestion: this.extractSuggestionFromThread(thread.body)
+            }));
+            console.error('DEBUG Orchestrator: Returning result');
+            return {
+                threads,
+                totalCount: coderabbitThreads.length,
+                hasMore: endIndex < coderabbitThreads.length,
+                page,
+                pageSize
+            };
+        }
+        catch (error) {
+            console.error('ERROR in Orchestrator.getUnresolvedThreads:');
+            console.error('Message:', error.message);
+            console.error('Stack:', error.stack?.substring(0, 500));
+            throw error;
+        }
+    }
+    async applyValidatedFix(repo, prNumber, threadId, filePath, diffString, commitMessage) {
+        try {
+            // Apply the patch using the batch method with a single patch
+            const patchRequest = {
+                threadId,
+                filePath,
+                patch: diffString
+            };
+            const result = await this.patcherAgent.applyBatch(repo, prNumber, [patchRequest]);
+            if (!result.success || result.failed.length > 0) {
+                throw new Error(`Failed to apply patch: ${result.failed.join(', ')}`);
+            }
+            // Commit and push
+            const message = commitMessage || `Fix: Apply validated fix for thread ${threadId}`;
+            await this.patcherAgent.commitAndPush(repo, prNumber, message);
+            // Resolve the thread
+            await this.githubAgent.resolveThread(repo, prNumber, threadId);
+            return { success: true, message: 'Fix applied successfully' };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            return { success: false, message: errorMessage };
+        }
+    }
+    extractSuggestionFromThread(body) {
+        // Extract key parts from CodeRabbit comment
+        const codeMatch = body.match(/```[\s\S]*?```/g);
+        const typeMatch = body.match(/^(?:\*\*)?(\w+)(?:\*\*)?:/);
+        return {
+            type: typeMatch ? typeMatch[1].toLowerCase() : 'suggestion',
+            hasCode: !!codeMatch,
+            codeBlocks: codeMatch || [],
+            description: body.replace(/```[\s\S]*?```/g, '').trim()
+        };
+    }
+    async run(repo, prNumber, maxIterations = 3, dryRun = false, validationMode = 'internal') {
         this.logger.info(`Starting orchestration for ${repo}#${prNumber}`);
         const result = {
             success: true,
@@ -56,6 +133,17 @@ export class OrchestratorAgent {
             if (prMeta.isDraft || prMeta.state === 'closed') {
                 throw new Error(`PR ${prNumber} is ${prMeta.isDraft ? 'draft' : 'closed'}`);
             }
+            // If external validation mode, just return the threads for Claude to analyze
+            if (validationMode === 'external') {
+                const threadsData = await this.getUnresolvedThreads(repo, prNumber, 1, 100);
+                return {
+                    ...result,
+                    threads: threadsData.threads,
+                    needsReview: threadsData.totalCount,
+                    totalCount: threadsData.totalCount,
+                    hasMore: threadsData.hasMore
+                };
+            }
             for (let iteration = 1; iteration <= maxIterations; iteration++) {
                 this.logger.info(`Starting iteration ${iteration} of ${maxIterations}`);
                 const iterationResult = await this.runIteration(repo, prNumber, dryRun);
@@ -65,8 +153,8 @@ export class OrchestratorAgent {
                 result.needsReview += iterationResult.needsReview;
                 result.errors.push(...iterationResult.errors);
                 // Check if all threads are resolved
-                const unresolvedThreads = await this.githubAgent.listReviewThreads(repo, prNumber, true);
-                const codeRabbitThreads = unresolvedThreads.filter(t => t.author.login === 'coderabbitai');
+                const unresolvedResult = await this.githubAgent.listReviewThreads(repo, prNumber, true);
+                const codeRabbitThreads = unresolvedResult.threads.filter(t => t.author.login === 'coderabbitai');
                 if (codeRabbitThreads.length === 0) {
                     this.logger.info('All CodeRabbit threads resolved');
                     break;
@@ -99,8 +187,8 @@ export class OrchestratorAgent {
         };
         try {
             // 1. Fetch all unresolved threads
-            const threads = await this.githubAgent.listReviewThreads(repo, prNumber, true);
-            const codeRabbitThreads = threads.filter(t => t.author.login === 'coderabbitai');
+            const threadsResult = await this.githubAgent.listReviewThreads(repo, prNumber, true);
+            const codeRabbitThreads = threadsResult.threads.filter(t => t.author.login === 'coderabbitai');
             this.logger.info(`Found ${codeRabbitThreads.length} unresolved CodeRabbit threads`);
             if (codeRabbitThreads.length === 0) {
                 return result;
@@ -217,7 +305,7 @@ export class OrchestratorAgent {
             case 'github_get_pr_meta':
                 return await this.githubAgent.getPRMeta(args.repo, args.prNumber);
             case 'github_list_review_threads':
-                return await this.githubAgent.listReviewThreads(args.repo, args.prNumber, args.onlyUnresolved);
+                return await this.githubAgent.listReviewThreads(args.repo, args.prNumber, args.onlyUnresolved, args.page, args.pageSize);
             case 'github_post_review_comment':
                 return await this.githubAgent.postComment(args.repo, args.prNumber, args.threadId, args.body);
             case 'github_resolve_thread':

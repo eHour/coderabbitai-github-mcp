@@ -39,9 +39,9 @@ export class MonitorAgent {
         const poll = async () => {
             try {
                 // Get latest comments
-                const threads = await this.githubAgent.listReviewThreads(repo, prNumber, false);
+                const threadsResult = await this.githubAgent.listReviewThreads(repo, prNumber, false);
                 // Check for new CodeRabbit responses
-                const codeRabbitThreads = threads.filter(t => {
+                const codeRabbitThreads = threadsResult.threads.filter(t => {
                     // Check if CodeRabbit has responded after our last comment
                     const lastComment = t.comments[t.comments.length - 1];
                     return lastComment.author.login === 'coderabbitai';
@@ -90,12 +90,12 @@ export class MonitorAgent {
     }
     async checkPRStatus(repo, prNumber) {
         const prMeta = await this.githubAgent.getPRMeta(repo, prNumber);
-        const threads = await this.githubAgent.listReviewThreads(repo, prNumber, true);
-        const codeRabbitThreads = threads.filter(t => t.author.login === 'coderabbitai');
+        const threadsResult = await this.githubAgent.listReviewThreads(repo, prNumber, true);
+        const codeRabbitThreads = threadsResult.threads.filter(t => t.author.login === 'coderabbitai');
         return {
             isOpen: prMeta.state === 'open',
             isDraft: prMeta.isDraft,
-            hasUnresolvedThreads: threads.length > 0,
+            hasUnresolvedThreads: threadsResult.threads.length > 0,
             codeRabbitThreadCount: codeRabbitThreads.length,
         };
     }

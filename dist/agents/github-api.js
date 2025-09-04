@@ -1,12 +1,14 @@
 import { graphql } from '@octokit/graphql';
 import { Octokit } from '@octokit/rest';
 import { Logger } from '../lib/logger.js';
+import { RateLimiter } from '../lib/rate-limiter.js';
 export class GitHubAPIAgent {
     messageBus;
     config;
     logger = new Logger('GitHubAPI');
     graphqlClient;
     restClient;
+    rateLimiter;
     constructor(messageBus, config) {
         this.messageBus = messageBus;
         this.config = config;
@@ -18,6 +20,14 @@ export class GitHubAPIAgent {
         this.restClient = new Octokit({
             auth: config.github.token,
         });
+        // Initialize rate limiter with config
+        this.rateLimiter = new RateLimiter(config.rateLimit || {
+            maxRequestsPerHour: 50,
+            maxRequestsPerMinute: 10,
+            maxConcurrent: 3,
+            backoffMultiplier: 2,
+            maxBackoffMs: 300000
+        });
         this.setupMessageHandlers();
     }
     setupMessageHandlers() {
@@ -25,9 +35,19 @@ export class GitHubAPIAgent {
             this.logger.debug(`Received message: ${message.type}`);
         });
     }
+    getRateLimitStatus() {
+        return this.rateLimiter.getStatus();
+    }
+    parseRepo(repo) {
+        const [owner, name] = repo.split('/');
+        if (!owner || !name) {
+            throw new Error(`Invalid repo "${repo}". Expected "owner/name".`);
+        }
+        return { owner, name };
+    }
     async getPRMeta(repo, prNumber) {
         this.logger.info(`Fetching PR metadata for ${repo}#${prNumber}`);
-        const [owner, name] = repo.split('/');
+        const { owner, name } = this.parseRepo(repo);
         const query = `
       query($owner: String!, $name: String!, $number: Int!) {
         repository(owner: $owner, name: $name) {
@@ -48,7 +68,10 @@ export class GitHubAPIAgent {
             name,
             number: prNumber,
         });
-        const pr = response.repository.pullRequest;
+        const pr = response?.repository?.pullRequest;
+        if (!pr) {
+            throw new Error(`PR #${prNumber} not found or not accessible in ${repo}`);
+        }
         return {
             number: pr.number,
             title: pr.title,
@@ -59,14 +82,23 @@ export class GitHubAPIAgent {
             headRefOid: pr.headRefOid,
         };
     }
-    async listReviewThreads(repo, prNumber, onlyUnresolved = true) {
-        this.logger.info(`Fetching review threads for ${repo}#${prNumber}`);
-        const [owner, name] = repo.split('/');
+    async listReviewThreads(repo, prNumber, onlyUnresolved = true, page = 1, pageSize = 10) {
+        this.logger.info(`Fetching review threads for ${repo}#${prNumber} (page ${page}, size ${pageSize})`);
+        const { owner, name } = this.parseRepo(repo);
+        // Constrain pageSize to reasonable limits
+        pageSize = Math.min(Math.max(1, pageSize), 50);
+        // We'll fetch all threads with pagination support
+        // For now, fetching up to 100 threads total (can be extended with cursor pagination if needed)
         const query = `
-      query($owner: String!, $name: String!, $number: Int!) {
+      query($owner: String!, $name: String!, $number: Int!, $first: Int!) {
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
-            reviewThreads(first: 100) {
+            reviewThreads(first: $first) {
+              totalCount
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
               nodes {
                 id
                 isResolved
@@ -75,7 +107,7 @@ export class GitHubAPIAgent {
                 path
                 line
                 startLine
-                comments(first: 50) {
+                comments(first: 10) {
                   nodes {
                     id
                     body
@@ -91,12 +123,15 @@ export class GitHubAPIAgent {
         }
       }
     `;
+        // For simplicity, fetch up to 100 threads initially
         const response = await this.graphqlClient(query, {
             owner,
             name,
             number: prNumber,
+            first: 100
         });
-        const threads = response.repository.pullRequest.reviewThreads.nodes;
+        const reviewThreads = response.repository.pullRequest.reviewThreads;
+        const threads = reviewThreads.nodes;
         // Filter and transform threads
         const result = [];
         for (const thread of threads) {
@@ -132,7 +167,11 @@ export class GitHubAPIAgent {
             });
         }
         this.logger.info(`Found ${result.length} ${onlyUnresolved ? 'unresolved ' : ''}review threads`);
-        return result;
+        return {
+            threads: result,
+            totalCount: reviewThreads.totalCount,
+            hasMore: reviewThreads.pageInfo.hasNextPage
+        };
     }
     async postComment(repo, prNumber, threadId, body) {
         if (!body.startsWith('@coderabbitai')) {
@@ -140,10 +179,14 @@ export class GitHubAPIAgent {
         }
         if (this.config.dry_run) {
             this.logger.dryRun('post comment', { repo, prNumber, threadId, body });
-            return;
+            return { success: true };
         }
+        // Rate limiting check
+        await this.rateLimiter.waitForLimit();
+        this.rateLimiter.startRequest();
         this.logger.info(`Posting comment to thread ${threadId}`);
-        const mutation = `
+        try {
+            const mutation = `
       mutation($threadId: ID!, $body: String!) {
         addPullRequestReviewThreadReply(input: {
           pullRequestReviewThreadId: $threadId,
@@ -155,20 +198,39 @@ export class GitHubAPIAgent {
         }
       }
     `;
-        await this.graphqlClient(mutation, {
-            threadId,
-            body,
-        });
+            const response = await this.graphqlClient(mutation, {
+                threadId,
+                body,
+            });
+            this.rateLimiter.endRequest(true);
+            return {
+                success: true,
+                commentId: response.addPullRequestReviewThreadReply?.comment?.id
+            };
+        }
+        catch (error) {
+            this.rateLimiter.endRequest(false);
+            // Check if it's a rate limit error
+            const errorMessage = error.message || '';
+            const rateLimitMatch = errorMessage.match(/wait (\d+) minutes? and (\d+) seconds?/i);
+            if (rateLimitMatch) {
+                const minutes = parseInt(rateLimitMatch[1] || '0', 10);
+                const seconds = parseInt(rateLimitMatch[2] || '0', 10);
+                this.rateLimiter.handleRateLimitError(minutes, seconds);
+                this.logger.error(`CodeRabbit rate limit: wait ${minutes}m ${seconds}s`);
+            }
+            throw error;
+        }
     }
     async resolveThread(repo, prNumber, threadId) {
         if (this.config.dry_run) {
             this.logger.dryRun('resolve thread', { repo, prNumber, threadId });
-            return;
+            return { success: true };
         }
         this.logger.info(`Resolving thread ${threadId}`);
         const mutation = `
       mutation($threadId: ID!) {
-        resolvePullRequestReviewThread(input: {
+        resolveReviewThread(input: {
           threadId: $threadId
         }) {
           thread {
@@ -181,9 +243,10 @@ export class GitHubAPIAgent {
         await this.graphqlClient(mutation, {
             threadId,
         });
+        return { success: true };
     }
     async waitForCheckRuns(repo, commitSha, maxAttempts = 60, waitInterval = 10000) {
-        const [owner, name] = repo.split('/');
+        const { owner, name } = this.parseRepo(repo);
         let hasChecks = false;
         this.logger.info(`Waiting for check runs on ${commitSha}`);
         for (let attempt = 0; attempt < maxAttempts; attempt++) {

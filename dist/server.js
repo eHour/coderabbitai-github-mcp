@@ -14,6 +14,18 @@ class CodeRabbitMCPServer {
     messageBus;
     stateManager;
     config;
+    safeStringify(obj) {
+        const seen = new WeakSet();
+        return JSON.stringify(obj, (_key, value) => {
+            if (typeof value === 'object' && value !== null) {
+                if (seen.has(value)) {
+                    return '[Circular Reference]';
+                }
+                seen.add(value);
+            }
+            return value;
+        }, 2);
+    }
     constructor() {
         this.server = new Server({
             name: 'mcp-coderabbit',
@@ -46,13 +58,15 @@ class CodeRabbitMCPServer {
                 },
                 {
                     name: 'github_list_review_threads',
-                    description: 'List review threads from a pull request',
+                    description: 'List review threads from a pull request (paginated)',
                     inputSchema: {
                         type: 'object',
                         properties: {
                             repo: { type: 'string' },
                             prNumber: { type: 'number' },
                             onlyUnresolved: { type: 'boolean', default: true },
+                            page: { type: 'number', default: 1, description: 'Page number (1-indexed)' },
+                            pageSize: { type: 'number', default: 10, description: 'Number of threads per page (max 50)' },
                         },
                         required: ['repo', 'prNumber'],
                     },
@@ -154,8 +168,47 @@ class CodeRabbitMCPServer {
                     },
                 },
                 {
+                    name: 'get_coderabbit_threads',
+                    description: 'Get unresolved CodeRabbit review threads for external validation (paginated)',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            repo: { type: 'string' },
+                            prNumber: { type: 'number' },
+                            page: { type: 'number', default: 1, description: 'Page number (1-indexed)' },
+                            pageSize: { type: 'number', default: 10, description: 'Number of threads per page (max 50)' },
+                        },
+                        required: ['repo', 'prNumber'],
+                    },
+                },
+                {
+                    name: 'apply_validated_fix',
+                    description: 'Apply a fix that has been validated externally (by Claude)',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            repo: { type: 'string' },
+                            prNumber: { type: 'number' },
+                            threadId: { type: 'string' },
+                            filePath: { type: 'string' },
+                            diffString: { type: 'string', description: 'Unified diff to apply' },
+                            commitMessage: { type: 'string' },
+                        },
+                        required: ['repo', 'prNumber', 'threadId', 'filePath', 'diffString'],
+                    },
+                },
+                {
+                    name: 'get_rate_limit_status',
+                    description: 'Get current rate limit status and remaining capacity',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {},
+                        required: [],
+                    },
+                },
+                {
                     name: 'run_orchestrator',
-                    description: 'Run the orchestrator to process all threads',
+                    description: 'Run the orchestrator to process all threads (uses internal heuristics only)',
                     inputSchema: {
                         type: 'object',
                         properties: {
@@ -163,6 +216,12 @@ class CodeRabbitMCPServer {
                             prNumber: { type: 'number' },
                             maxIterations: { type: 'number', default: 3 },
                             dryRun: { type: 'boolean', default: false },
+                            validationMode: {
+                                type: 'string',
+                                enum: ['internal', 'external'],
+                                default: 'internal',
+                                description: 'internal: use heuristics/LLM, external: return threads for Claude validation'
+                            },
                         },
                         required: ['repo', 'prNumber'],
                     },
@@ -173,13 +232,61 @@ class CodeRabbitMCPServer {
             const { name, arguments: args } = request.params;
             try {
                 switch (name) {
-                    case 'run_orchestrator':
-                        const result = await this.orchestrator.run(args?.repo, args?.prNumber, args?.maxIterations, args?.dryRun);
+                    case 'get_coderabbit_threads': {
+                        try {
+                            console.error('DEBUG: Calling getUnresolvedThreads with:', {
+                                repo: args?.repo,
+                                pr: args?.prNumber,
+                                page: args?.page,
+                                pageSize: args?.pageSize
+                            });
+                            const threads = await this.orchestrator.getUnresolvedThreads(args?.repo, args?.prNumber, args?.page, args?.pageSize);
+                            console.error('DEBUG: Got threads result:', typeof threads);
+                            return {
+                                content: [
+                                    {
+                                        type: 'text',
+                                        text: this.safeStringify(threads),
+                                    },
+                                ],
+                            };
+                        }
+                        catch (error) {
+                            console.error('ERROR in get_coderabbit_threads:');
+                            console.error('Message:', error.message);
+                            console.error('Stack trace:', error.stack);
+                            throw error;
+                        }
+                    }
+                    case 'get_rate_limit_status': {
+                        const status = this.orchestrator.getRateLimitStatus();
                         return {
                             content: [
                                 {
                                     type: 'text',
-                                    text: JSON.stringify(result, null, 2),
+                                    text: this.safeStringify(status),
+                                },
+                            ],
+                        };
+                    }
+                    case 'apply_validated_fix': {
+                        const result = await this.orchestrator.applyValidatedFix(args?.repo, args?.prNumber, args?.threadId, args?.filePath, args?.diffString, args?.commitMessage);
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: this.safeStringify(result),
+                                },
+                            ],
+                        };
+                    }
+                    case 'run_orchestrator':
+                        const result = await this.orchestrator.run(args?.repo, args?.prNumber, args?.maxIterations, args?.dryRun, args?.validationMode);
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: this.safeStringify(result),
                                 },
                             ],
                         };
@@ -190,7 +297,7 @@ class CodeRabbitMCPServer {
                             content: [
                                 {
                                     type: 'text',
-                                    text: JSON.stringify(toolResult, null, 2),
+                                    text: this.safeStringify(toolResult),
                                 },
                             ],
                         };

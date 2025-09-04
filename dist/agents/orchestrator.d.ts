@@ -12,13 +12,29 @@ export declare class OrchestratorAgent {
     private taskQueue;
     constructor(messageBus: MessageBus, stateManager: StateManager, config: Config);
     private setupMessageHandlers;
-    run(repo: string, prNumber: number, maxIterations?: number, dryRun?: boolean): Promise<{
+    getRateLimitStatus(): any;
+    getUnresolvedThreads(repo: string, prNumber: number, page?: number, pageSize?: number): Promise<{
+        threads: any[];
+        totalCount: number;
+        hasMore: boolean;
+        page: number;
+        pageSize: number;
+    }>;
+    applyValidatedFix(repo: string, prNumber: number, threadId: string, filePath: string, diffString: string, commitMessage?: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    private extractSuggestionFromThread;
+    run(repo: string, prNumber: number, maxIterations?: number, dryRun?: boolean, validationMode?: 'internal' | 'external'): Promise<{
         success: boolean;
         processed: number;
         resolved: number;
         rejected: number;
         needsReview: number;
         errors: string[];
+        threads?: any[];
+        totalCount?: number;
+        hasMore?: boolean;
     }>;
     private runIteration;
     private analyzeThread;

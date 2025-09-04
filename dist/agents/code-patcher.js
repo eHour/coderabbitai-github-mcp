@@ -18,9 +18,18 @@ export class CodePatcherAgent {
     }
     setupMessageHandlers() {
         this.messageBus.subscribe('code-patcher', async (message) => {
-            if (message.type === 'APPLY_PATCH') {
-                const result = await this.applyPatch(message.payload);
-                this.messageBus.respond(message, result);
+            if (message.type !== 'APPLY_PATCH')
+                return;
+            try {
+                await this.applyPatch(message.payload);
+                this.messageBus.respond(message, { success: true });
+            }
+            catch (error) {
+                this.logger.error(`Failed to apply patch`, error);
+                this.messageBus.respond(message, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         });
     }
@@ -63,7 +72,9 @@ export class CodePatcherAgent {
         const fullPath = path.join(this.workDir, actualFilePath);
         const resolvedPath = path.resolve(fullPath);
         // Prevent path traversal attacks
-        if (!resolvedPath.startsWith(path.resolve(this.workDir))) {
+        const base = path.resolve(this.workDir);
+        const rel = path.relative(base, resolvedPath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
             throw new Error(`Path traversal detected: ${actualFilePath}`);
         }
         // Read current file content
@@ -81,34 +92,13 @@ export class CodePatcherAgent {
         return match ? match[1] : null;
     }
     applyUnifiedDiff(original, patchStr) {
-        // Parse and apply unified diff
-        const patches = diff.parsePatch(patchStr);
-        if (patches.length === 0) {
-            throw new Error('Invalid patch format');
+        const patched = diff.applyPatch(original, patchStr);
+        if (patched === false) {
+            throw new Error('Failed to apply patch');
         }
-        let result = original;
-        for (const patch of patches) {
-            for (const hunk of patch.hunks || []) {
-                result = this.applyHunk(result, hunk);
-            }
-        }
-        return result;
+        return patched;
     }
-    applyHunk(content, hunk) {
-        const lines = content.split('\n');
-        const startLine = hunk.oldStart - 1; // Convert to 0-based index
-        // Remove old lines and add new lines
-        const toRemove = hunk.oldLines;
-        const newLines = [];
-        for (const change of hunk.lines) {
-            if (change.startsWith('+')) {
-                newLines.push(change.substring(1));
-            }
-        }
-        // Apply the changes
-        lines.splice(startLine, toRemove, ...newLines);
-        return lines.join('\n');
-    }
+    // Removed custom applyHunk; rely on diff.applyPatch
     async commitAndPush(_repo, _prNumber, message) {
         if (this.config.dry_run) {
             this.logger.dryRun('commit and push', { message });

@@ -50,7 +50,7 @@ export class GitHubAPIAgent {
   }
 
   private parseRepo(repo: string): { owner: string; name: string } {
-    const { owner, name } = this.parseRepo(repo);
+    const [owner, name] = repo.split('/');
     if (!owner || !name) {
       throw new Error(`Invalid repo "${repo}". Expected "owner/name".`);
     }
