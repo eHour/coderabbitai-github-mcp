@@ -49,10 +49,18 @@ export class GitHubAPIAgent {
     return this.rateLimiter.getStatus();
   }
 
+  private parseRepo(repo: string): { owner: string; name: string } {
+    const { owner, name } = this.parseRepo(repo);
+    if (!owner || !name) {
+      throw new Error(`Invalid repo "${repo}". Expected "owner/name".`);
+    }
+    return { owner, name };
+  }
+
   async getPRMeta(repo: string, prNumber: number): Promise<PullRequest> {
     this.logger.info(`Fetching PR metadata for ${repo}#${prNumber}`);
     
-    const [owner, name] = repo.split('/');
+    const { owner, name } = this.parseRepo(repo);
     
     const query = `
       query($owner: String!, $name: String!, $number: Int!) {
@@ -76,7 +84,10 @@ export class GitHubAPIAgent {
       number: prNumber,
     });
 
-    const pr = response.repository.pullRequest;
+    const pr = response?.repository?.pullRequest;
+    if (!pr) {
+      throw new Error(`PR #${prNumber} not found or not accessible in ${repo}`);
+    }
     
     return {
       number: pr.number,
@@ -98,7 +109,7 @@ export class GitHubAPIAgent {
   ): Promise<{ threads: ReviewThread[]; totalCount: number; hasMore: boolean }> {
     this.logger.info(`Fetching review threads for ${repo}#${prNumber} (page ${page}, size ${pageSize})`);
     
-    const [owner, name] = repo.split('/');
+    const { owner, name } = this.parseRepo(repo);
     
     // Constrain pageSize to reasonable limits
     pageSize = Math.min(Math.max(1, pageSize), 50);
@@ -295,7 +306,7 @@ export class GitHubAPIAgent {
     maxAttempts = 60,
     waitInterval = 10000
   ): Promise<CheckRunConclusion> {
-    const [owner, name] = repo.split('/');
+    const { owner, name } = this.parseRepo(repo);
     let hasChecks = false;
 
     this.logger.info(`Waiting for check runs on ${commitSha}`);
