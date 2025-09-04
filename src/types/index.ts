@@ -1,7 +1,7 @@
 export interface ReviewThread {
   id: string;
   isResolved: boolean;
-  comments: Comment[];
+  comments: ReviewComment[];
   path?: string;
   line?: number;
   startLine?: number;
@@ -12,7 +12,7 @@ export interface ReviewThread {
   createdAt: string;
 }
 
-export interface Comment {
+export interface ReviewComment {
   id: string;
   body: string;
   author: {

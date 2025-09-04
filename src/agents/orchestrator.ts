@@ -87,8 +87,9 @@ export class OrchestratorAgent {
         path: thread.path,
         line: thread.line,
         body: thread.body,
-        createdAt: thread.createdAt,
-        suggestion: this.extractSuggestionFromThread(thread.body)
+        createdAt: thread.createdAt
+        // Note: suggestion extraction removed to reduce initial response size
+        // Suggestion will be extracted when thread is actually processed
       }));
       
       console.error('DEBUG Orchestrator: Returning result');
@@ -141,19 +142,6 @@ export class OrchestratorAgent {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, message: errorMessage };
     }
-  }
-
-  private extractSuggestionFromThread(body: string): any {
-    // Extract key parts from CodeRabbit comment
-    const codeMatch = body.match(/```[\s\S]*?```/g);
-    const typeMatch = body.match(/^(?:\*\*)?(\w+)(?:\*\*)?:/);
-    
-    return {
-      type: typeMatch ? typeMatch[1].toLowerCase() : 'suggestion',
-      hasCode: !!codeMatch,
-      codeBlocks: codeMatch || [],
-      description: body.replace(/```[\s\S]*?```/g, '').trim()
-    };
   }
 
   async run(

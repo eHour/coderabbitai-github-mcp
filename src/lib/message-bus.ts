@@ -59,23 +59,25 @@ export class MessageBus extends EventEmitter {
     };
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const responseChannel = `${message.source}-response`;
+      let timeout: NodeJS.Timeout;
+
+      const responseHandler = (response: AgentMessage) => {
+        if (response.correlationId !== messageId) return;
+        clearTimeout(timeout);
+        this.pendingResponses.delete(messageId);
+        this.off(responseChannel, responseHandler);
+        resolve(response.payload);
+      };
+
+      timeout = setTimeout(() => {
+        this.off(responseChannel, responseHandler);
         this.pendingResponses.delete(messageId);
         reject(new Error(`Request timeout: ${message.type} to ${message.target}`));
       }, timeoutMs);
 
       this.pendingResponses.set(messageId, { resolve, reject, timeout });
-
-      const responseHandler = (response: AgentMessage) => {
-        if (response.correlationId === messageId) {
-          clearTimeout(timeout);
-          this.pendingResponses.delete(messageId);
-          this.off(`${message.source}-response`, responseHandler);
-          resolve(response.payload);
-        }
-      };
-
-      this.on(`${message.source}-response`, responseHandler);
+      this.on(responseChannel, responseHandler);
 
       this.messageLog.push(fullMessage);
       

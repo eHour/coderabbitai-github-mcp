@@ -39,12 +39,12 @@ export const metadata = {
     batchSize: {
       type: 'number',
       description: 'Number of threads to process at once',
-      default: 5,
+      default: 3,
     },
   },
 };
 
-export async function run({ repo, pr, dryRun = false, autoResolve = true, batchSize = 5 }) {
+export async function run({ repo, pr, dryRun = false, autoResolve = true, batchSize = 3 }) {
   console.log(`🤖 CodeRabbit Resolver Agent`);
   console.log(`📍 Repository: ${repo}`);
   console.log(`📝 PR: #${pr}`);

@@ -177,7 +177,7 @@ class CodeRabbitMCPServer {
                             repo: { type: 'string' },
                             prNumber: { type: 'number' },
                             page: { type: 'number', default: 1, description: 'Page number (1-indexed)' },
-                            pageSize: { type: 'number', default: 10, description: 'Number of threads per page (max 50)' },
+                            pageSize: { type: 'number', default: 3, description: 'Number of threads per page (default 3, max 50)' },
                         },
                         required: ['repo', 'prNumber'],
                     },

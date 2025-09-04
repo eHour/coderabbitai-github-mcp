@@ -53,34 +53,34 @@ export class Logger {
     this.context = context;
   }
 
-  debug(message: string, metadata?: any): void {
+  debug(message: string, metadata: Record<string, unknown> = {}): void {
     logger.debug(message, { context: this.context, ...metadata });
   }
 
-  info(message: string, metadata?: any): void {
+  info(message: string, metadata: Record<string, unknown> = {}): void {
     logger.info(message, { context: this.context, ...metadata });
   }
 
-  warn(message: string, metadata?: any): void {
+  warn(message: string, metadata: Record<string, unknown> = {}): void {
     logger.warn(message, { context: this.context, ...metadata });
   }
 
-  error(message: string, error?: any, metadata?: any): void {
-    if (error instanceof Error) {
+  error(message: string, err?: unknown, metadata: Record<string, unknown> = {}): void {
+    if (err instanceof Error) {
       logger.error(message, {
         context: this.context,
         error: {
-          message: error.message,
-          stack: error.stack,
+          message: err.message,
+          stack: err.stack,
         },
         ...metadata,
       });
     } else {
-      logger.error(message, { context: this.context, error, ...metadata });
+      logger.error(message, { context: this.context, error: err, ...metadata });
     }
   }
 
-  thread(threadId: string, message: string, metadata?: any): void {
+  thread(threadId: string, message: string, metadata: Record<string, unknown> = {}): void {
     logger.info(message, {
       context: this.context,
       threadId,
@@ -88,7 +88,7 @@ export class Logger {
     });
   }
 
-  dryRun(action: string, details: any): void {
+  dryRun(action: string, details: unknown): void {
     if (isDryRun) {
       logger.info(`Would ${action}`, {
         context: this.context,

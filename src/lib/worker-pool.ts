@@ -3,7 +3,7 @@ import { Logger } from './logger.js';
 export class WorkerPool<T> {
   private available: T[] = [];
   private busy = new Set<T>();
-  private waiting: Array<(worker: T) => void> = [];
+  private waiting: Array<{ resolve: (worker: T) => void; reject: (err: any) => void }> = [];
   private logger = new Logger('WorkerPool');
 
   constructor(workers: T[]) {
@@ -21,8 +21,8 @@ export class WorkerPool<T> {
     }
 
     // Otherwise wait for one to become available
-    return new Promise((resolve) => {
-      this.waiting.push(resolve);
+    return new Promise<T>((resolve, reject) => {
+      this.waiting.push({ resolve, reject });
       this.logger.debug(`Worker requested, ${this.waiting.length} in queue`);
     });
   }
@@ -37,9 +37,9 @@ export class WorkerPool<T> {
 
     // If someone is waiting, give them the worker
     if (this.waiting.length > 0) {
-      const resolve = this.waiting.shift()!;
+      const waiter = this.waiting.shift()!;
       this.busy.add(worker);
-      resolve(worker);
+      waiter.resolve(worker);
       this.logger.debug(`Worker reassigned, ${this.waiting.length} in queue`);
     } else {
       // Otherwise return to available pool
@@ -74,6 +74,10 @@ export class WorkerPool<T> {
   async drain(): Promise<void> {
     // Wait for all busy workers to be released
     while (this.busy.size > 0 || this.waiting.length > 0) {
+      // Fast-fail if there are waiters but no workers at all
+      if (this.available.length + this.busy.size === 0 && this.waiting.length > 0) {
+        throw new Error('WorkerPool drain() stalled: no workers in pool while waiters exist');
+      }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
@@ -85,8 +89,10 @@ export class WorkerPool<T> {
     }
     this.busy.clear();
     
-    // Clear all waiting requests
-    // Note: In production, we'd want to track reject functions too
+    // Reject all waiting requests
+    for (const waiter of this.waiting) {
+      waiter.reject(new Error('WorkerPool reset: pending acquire() cancelled'));
+    }
     this.waiting = [];
     
     this.logger.info('Worker pool reset');

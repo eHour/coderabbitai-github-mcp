@@ -31,31 +31,31 @@ export class Logger {
     constructor(context) {
         this.context = context;
     }
-    debug(message, metadata) {
+    debug(message, metadata = {}) {
         logger.debug(message, { context: this.context, ...metadata });
     }
-    info(message, metadata) {
+    info(message, metadata = {}) {
         logger.info(message, { context: this.context, ...metadata });
     }
-    warn(message, metadata) {
+    warn(message, metadata = {}) {
         logger.warn(message, { context: this.context, ...metadata });
     }
-    error(message, error, metadata) {
-        if (error instanceof Error) {
+    error(message, err, metadata = {}) {
+        if (err instanceof Error) {
             logger.error(message, {
                 context: this.context,
                 error: {
-                    message: error.message,
-                    stack: error.stack,
+                    message: err.message,
+                    stack: err.stack,
                 },
                 ...metadata,
             });
         }
         else {
-            logger.error(message, { context: this.context, error, ...metadata });
+            logger.error(message, { context: this.context, error: err, ...metadata });
         }
     }
-    thread(threadId, message, metadata) {
+    thread(threadId, message, metadata = {}) {
         logger.info(message, {
             context: this.context,
             threadId,

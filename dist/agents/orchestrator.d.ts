@@ -24,7 +24,6 @@ export declare class OrchestratorAgent {
         success: boolean;
         message: string;
     }>;
-    private extractSuggestionFromThread;
     run(repo: string, prNumber: number, maxIterations?: number, dryRun?: boolean, validationMode?: 'internal' | 'external'): Promise<{
         success: boolean;
         processed: number;

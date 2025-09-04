@@ -16,21 +16,33 @@ export class StateManager {
     }
     async updateThreadState(threadId, updater) {
         const release = await this.mutex.acquire();
+        let newState;
+        let callbacks = [];
         try {
             const currentState = this.state.get(threadId);
-            const newState = updater(currentState);
+            newState = updater(currentState);
             this.state.set(threadId, newState);
             this.logger.debug(`Thread state updated: ${threadId}`, {
                 from: currentState?.status,
                 to: newState.status,
             });
-            // Notify listeners
-            this.notifyListeners(threadId, newState);
-            return newState;
+            // Capture listeners to notify after releasing the lock
+            const ls = this.listeners.get(threadId);
+            callbacks = ls ? Array.from(ls) : [];
         }
         finally {
             release();
         }
+        // Notify listeners outside the lock
+        for (const cb of callbacks) {
+            try {
+                cb(newState);
+            }
+            catch (error) {
+                this.logger.error(`Listener error for thread ${threadId}`, error);
+            }
+        }
+        return newState;
     }
     async batchUpdateThreadStates(updates) {
         const release = await this.mutex.acquire();
@@ -134,6 +146,7 @@ export class StateManager {
         const release = await this.mutex.acquire();
         try {
             this.state.clear();
+            this.listeners.clear();
             this.logger.info('State reset');
         }
         finally {

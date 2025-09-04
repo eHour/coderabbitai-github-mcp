@@ -17,8 +17,8 @@ export class WorkerPool {
             return worker;
         }
         // Otherwise wait for one to become available
-        return new Promise((resolve) => {
-            this.waiting.push(resolve);
+        return new Promise((resolve, reject) => {
+            this.waiting.push({ resolve, reject });
             this.logger.debug(`Worker requested, ${this.waiting.length} in queue`);
         });
     }
@@ -30,9 +30,9 @@ export class WorkerPool {
         this.busy.delete(worker);
         // If someone is waiting, give them the worker
         if (this.waiting.length > 0) {
-            const resolve = this.waiting.shift();
+            const waiter = this.waiting.shift();
             this.busy.add(worker);
-            resolve(worker);
+            waiter.resolve(worker);
             this.logger.debug(`Worker reassigned, ${this.waiting.length} in queue`);
         }
         else {
@@ -61,6 +61,10 @@ export class WorkerPool {
     async drain() {
         // Wait for all busy workers to be released
         while (this.busy.size > 0 || this.waiting.length > 0) {
+            // Fast-fail if there are waiters but no workers at all
+            if (this.available.length + this.busy.size === 0 && this.waiting.length > 0) {
+                throw new Error('WorkerPool drain() stalled: no workers in pool while waiters exist');
+            }
             await new Promise(resolve => setTimeout(resolve, 100));
         }
     }
@@ -70,8 +74,10 @@ export class WorkerPool {
             this.available.push(worker);
         }
         this.busy.clear();
-        // Clear all waiting requests
-        // Note: In production, we'd want to track reject functions too
+        // Reject all waiting requests
+        for (const waiter of this.waiting) {
+            waiter.reject(new Error('WorkerPool reset: pending acquire() cancelled'));
+        }
         this.waiting = [];
         this.logger.info('Worker pool reset');
     }

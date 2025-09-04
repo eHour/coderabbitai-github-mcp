@@ -24,7 +24,7 @@ export const ConfigSchema = z.object({
     checkInterval: z.number().min(5000).default(10000), // 10 seconds
   }),
   github: z.object({
-    token: z.string(),
+    token: z.string().min(1, 'GitHub token is required'),
     owner: z.string().optional(),
     repo: z.string().optional(),
   }),

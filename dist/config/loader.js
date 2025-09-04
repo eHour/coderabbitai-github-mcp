@@ -2,8 +2,23 @@ import { ConfigSchema } from './schemas.js';
 import { Logger } from '../lib/logger.js';
 import * as fs from 'fs';
 import path from 'path';
+import * as os from 'os';
 import * as dotenv from 'dotenv';
 const logger = new Logger('ConfigLoader');
+function deepMerge(base, override) {
+    if (Array.isArray(base) || Array.isArray(override))
+        return override ?? base;
+    if (base && typeof base === 'object' && override && typeof override === 'object') {
+        const out = { ...base };
+        for (const key of Object.keys(override)) {
+            const bv = base[key];
+            const ov = override[key];
+            out[key] = deepMerge(bv, ov);
+        }
+        return out;
+    }
+    return override ?? base;
+}
 export function loadConfig() {
     // Load .env file if it exists
     dotenv.config();
@@ -32,7 +47,7 @@ export function loadConfig() {
     const configPaths = [
         path.join(process.cwd(), 'coderabbit-mcp.json'),
         path.join(process.cwd(), '.coderabbit-mcp.json'),
-        path.join(process.env.HOME || '', '.config', 'coderabbit-mcp.json'),
+        path.join(os.homedir(), '.config', 'coderabbit-mcp.json'),
     ];
     for (const configPath of configPaths) {
         if (fs.existsSync(configPath)) {
@@ -40,7 +55,7 @@ export function loadConfig() {
             try {
                 const fileContent = fs.readFileSync(configPath, 'utf-8');
                 const fileConfig = JSON.parse(fileContent);
-                config = { ...config, ...fileConfig };
+                config = deepMerge(config, fileConfig);
                 break;
             }
             catch (error) {
