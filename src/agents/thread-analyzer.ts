@@ -49,7 +49,21 @@ export class ThreadAnalyzerAgent {
     _repo: string,
     _prNumber: number
   ): Promise<AnalysisResult> {
-    this.logger.info(`Analyzing thread ${thread.id}`);
+    // Extract comment preview for better visibility
+    const lines = thread.body.split('\n');
+    const suggestionLine = lines.find(line => 
+      line.trim() && 
+      !line.startsWith('#') && 
+      !line.includes('```') &&
+      !line.match(/^[⚠️🛠️🐛🔒⚡📚]/)
+    ) || '';
+    const preview = suggestionLine.replace(/[*_`]/g, '').trim().substring(0, 100);
+    const location = thread.path ? `${thread.path}:${thread.line || '?'}` : 'no file';
+    
+    this.logger.info(`\n${'='.repeat(60)}`);
+    this.logger.info(`ANALYZING THREAD: ${thread.id}`);
+    this.logger.info(`📁 Location: ${location}`);
+    this.logger.info(`💬 Comment: "${preview}${suggestionLine.length > 100 ? '...' : ''}"`);
     
     try {
       // Extract the CodeRabbit suggestion
@@ -58,7 +72,9 @@ export class ThreadAnalyzerAgent {
       // First, try heuristics
       const heuristicResult = this.applyHeuristics(suggestion, thread);
       if (heuristicResult) {
-        this.logger.info(`Thread ${thread.id} matched heuristic: ${heuristicResult.result}`);
+        this.logger.info(`✅ Heuristic Result: ${heuristicResult.result.toUpperCase()}`);
+        this.logger.info(`   Reason: ${heuristicResult.reasoning}`);
+        this.logger.info(`   Confidence: ${(heuristicResult.confidence * 100).toFixed(0)}%`);
         return heuristicResult;
       }
 

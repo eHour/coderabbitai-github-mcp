@@ -6,7 +6,7 @@ import { OrchestratorAgent } from './agents/orchestrator.js';
 import { MessageBus } from './lib/message-bus.js';
 import { StateManager } from './lib/state-manager.js';
 import { Logger } from './lib/logger.js';
-import { loadConfig } from './config/loader.js';
+import { loadConfig, validateGitHubToken } from './config/loader.js';
 const logger = new Logger('MCP-Server');
 class CodeRabbitMCPServer {
     server;
@@ -38,6 +38,7 @@ class CodeRabbitMCPServer {
         this.messageBus = new MessageBus();
         this.stateManager = new StateManager();
         this.config = loadConfig();
+        validateGitHubToken(this.config);
         this.orchestrator = new OrchestratorAgent(this.messageBus, this.stateManager, this.config);
         this.setupTools();
     }

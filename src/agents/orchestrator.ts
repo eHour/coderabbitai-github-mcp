@@ -278,18 +278,28 @@ export class OrchestratorAgent {
       const threadsResult = await this.githubAgent.listReviewThreads(repo, prNumber, true);
       const codeRabbitThreads = threadsResult.threads.filter(t => t.author.login === 'coderabbitai');
       
-      this.logger.info(`Found ${codeRabbitThreads.length} unresolved CodeRabbit threads`);
+      this.logger.info(`\n${'='.repeat(70)}`);
+      this.logger.info(`📊 Found ${codeRabbitThreads.length} unresolved CodeRabbit threads`);
+      this.logger.info(`${'='.repeat(70)}`);
       
       if (codeRabbitThreads.length === 0) {
         return result;
       }
 
-      // 2. Mark threads as processing
+      // Log thread details for visibility
+      codeRabbitThreads.forEach((thread, index) => {
+        const preview = thread.body.replace(/\n/g, ' ').substring(0, 60);
+        const location = thread.path ? `${thread.path}:${thread.line || '?'}` : 'no file';
+        this.logger.info(`Thread ${index + 1}/${codeRabbitThreads.length}: ${location} - "${preview}..."`);
+      });
+
+      // Step 1: REVIEW - Analyze all threads
+      this.logger.info(`\n📋 STEP 1: REVIEW - Analyzing ${codeRabbitThreads.length} threads...`);
       await this.stateManager.markThreadsAsProcessing(
         codeRabbitThreads.map(t => t.id)
       );
 
-      // 3. Analyze threads in parallel
+      // Analyze threads in parallel
       const analysisPromises = codeRabbitThreads.map(thread =>
         this.taskQueue.add(() => this.analyzeThread(thread, repo, prNumber))
       );
@@ -327,9 +337,9 @@ export class OrchestratorAgent {
         }
       }
 
-      // 5. Apply valid fixes in batch
+      // Step 2: FIX - Apply valid fixes
       if (validFixes.length > 0 && !dryRun) {
-        this.logger.info(`Applying ${validFixes.length} valid fixes`);
+        this.logger.info(`\n🔧 STEP 2: FIX - Applying ${validFixes.length} valid fixes...`);
         
         const patchResults = await this.patcherAgent.applyBatch(
           repo,
@@ -342,25 +352,29 @@ export class OrchestratorAgent {
         );
 
         if (patchResults.success) {
-          // 6. Commit and push
+          // Step 3: COMMIT
+          this.logger.info(`\n💾 STEP 3: COMMIT - Creating commit for ${validFixes.length} fixes...`);
           const commitSha = await this.patcherAgent.commitAndPush(
             repo,
             prNumber,
             `fix: apply ${validFixes.length} CodeRabbit suggestions`
           );
 
-          // 7. Mark threads as pushed
+          // Step 4: PUSH
+          this.logger.info(`\n⬆️  STEP 4: PUSH - Pushing changes to remote...`);
+          this.logger.info(`   Commit SHA: ${commitSha}`);
           await this.stateManager.markThreadsAsPushed(
             validFixes.map(f => f.threadId),
             commitSha
           );
 
-          // 8. Wait for CI
-          this.logger.info('Waiting for CI checks...');
+          // Wait for CI
+          this.logger.info(`\n🔄 Waiting for CI checks to complete...`);
           const ciResult = await this.monitorAgent.waitForCI(repo, prNumber, commitSha);
 
           if (ciResult === 'success') {
-            // 9. Resolve threads
+            // Step 5: RESOLVE
+            this.logger.info(`\n✅ STEP 5: RESOLVE - Marking ${validFixes.length} threads as resolved...`);
             for (const fix of validFixes) {
               await this.githubAgent.resolveThread(repo, prNumber, fix.threadId);
               await this.githubAgent.postComment(
@@ -371,6 +385,10 @@ export class OrchestratorAgent {
               );
               result.resolved++;
             }
+            this.logger.info(`   Successfully resolved all ${validFixes.length} threads!`);
+            
+            // Step 6: NEXT
+            this.logger.info(`\n➡️  STEP 6: NEXT - Moving to next iteration...`);
           } else {
             // CI failed - revert and notify
             this.logger.warn('CI failed, reverting commit');
@@ -392,7 +410,9 @@ export class OrchestratorAgent {
             }
           }
         } else {
-          const errMsg = patchResults.error || 'Failed to apply patches';
+          const errMsg = patchResults.failed.length > 0 
+            ? `Failed to apply patches for threads: ${patchResults.failed.join(', ')}`
+            : 'Failed to apply patches';
           this.logger.warn(errMsg);
           result.errors.push(errMsg);
           // Mark as needs review since patch couldn't be applied

@@ -7,6 +7,7 @@ export class MonitorAgent {
     logger = new Logger('Monitor');
     githubAgent;
     pollingIntervals = new Map();
+    lastSeenCommentId = new Map();
     constructor(messageBus, stateManager, config) {
         this.messageBus = messageBus;
         this.stateManager = stateManager;
@@ -24,7 +25,7 @@ export class MonitorAgent {
     }
     async waitForCI(repo, prNumber, commitSha) {
         this.logger.info(`Monitoring CI for commit ${commitSha}`);
-        const result = await this.githubAgent.waitForCheckRuns(repo, commitSha, Math.floor(this.config.ci.waitTimeout / this.config.ci.checkInterval), this.config.ci.checkInterval);
+        const result = await this.githubAgent.waitForCheckRuns(repo, commitSha, Math.max(1, Math.floor(this.config.ci.waitTimeout / this.config.ci.checkInterval)), this.config.ci.checkInterval);
         if (result === 'failure') {
             const url = await this.githubAgent.getCheckRunsUrl(repo, prNumber, commitSha);
             this.logger.warn(`CI failed for ${commitSha}: ${url}`);
@@ -41,11 +42,18 @@ export class MonitorAgent {
                 // Get latest comments
                 const threadsResult = await this.githubAgent.listReviewThreads(repo, prNumber, false);
                 // Check for new CodeRabbit responses
-                const codeRabbitThreads = threadsResult.threads.filter(t => {
-                    // Check if CodeRabbit has responded after our last comment
+                const updates = [];
+                for (const t of threadsResult.threads) {
                     const lastComment = t.comments[t.comments.length - 1];
-                    return lastComment.author.login === 'coderabbitai';
-                });
+                    if (lastComment.author.login === 'coderabbitai') {
+                        const prevId = this.lastSeenCommentId.get(t.id);
+                        if (lastComment.id !== prevId) {
+                            updates.push(t);
+                            this.lastSeenCommentId.set(t.id, lastComment.id);
+                        }
+                    }
+                }
+                const codeRabbitThreads = updates;
                 if (codeRabbitThreads.length > 0) {
                     this.logger.info(`Found ${codeRabbitThreads.length} threads with new CodeRabbit responses`);
                     // Notify orchestrator about updates
@@ -87,6 +95,7 @@ export class MonitorAgent {
             this.logger.info(`Stopped polling for ${key}`);
         }
         this.pollingIntervals.clear();
+        this.lastSeenCommentId.clear();
     }
     async checkPRStatus(repo, prNumber) {
         const prMeta = await this.githubAgent.getPRMeta(repo, prNumber);

@@ -79,54 +79,81 @@ export async function run({ repo, pr, dryRun = false, autoResolve = true, batchS
     
     // 2. Process each thread
     for (const thread of threadsResponse.threads) {
-      console.log(`\n🔍 Processing thread: ${thread.id}`);
-      console.log(`   📁 File: ${thread.path}:${thread.line}`);
+      // Extract comment preview (first 80 chars of the actual suggestion)
+      const commentLines = thread.body.split('\n');
+      const suggestionLine = commentLines.find(line => line.trim() && !line.startsWith('#') && !line.includes('```')) || '';
+      const preview = suggestionLine.replace(/[*_`]/g, '').trim().substring(0, 80);
+      
+      console.log(`\n${'='.repeat(70)}`);
+      console.log(`📌 THREAD ${threadsResponse.threads.indexOf(thread) + 1}/${threadsResponse.threads.length}: ${thread.id}`);
+      console.log(`${'='.repeat(70)}`);
+      console.log(`📁 File: ${thread.path || 'N/A'}`);
+      console.log(`📍 Line: ${thread.line || 'N/A'}`);
+      console.log(`💬 Comment: "${preview}${suggestionLine.length > 80 ? '...' : ''}"`);
       
       // Extract the issue type from the body
       const issueType = detectIssueType(thread.body);
-      console.log(`   🏷️  Type: ${issueType}`);
+      console.log(`🏷️  Category: ${issueType}`);
 
-      // 3. Validate the suggestion
+      // Step 1: REVIEW - Validate the suggestion
+      console.log(`\n📋 Step 1: REVIEW`);
       const validation = await validateSuggestion(thread, issueType);
       
       if (validation.isValid) {
-        console.log(`   ✅ Valid suggestion: ${validation.reason}`);
+        console.log(`   ✅ Review Result: ACCEPTED - ${validation.reason}`);
         
         if (!dryRun && thread.suggestion?.codeBlocks?.[0]) {
           try {
-            // 4. Apply the fix
-            console.log(`   🔧 Applying fix...`);
+            // Step 2: FIX - Apply the changes
+            console.log(`\n🔧 Step 2: FIX`);
+            console.log(`   Extracting fix from suggestion...`);
             const fix = extractFixFromDiff(thread.suggestion.codeBlocks[0]);
             
             if (fix) {
+              console.log(`   Applying patch to ${thread.path}...`);
               await applyFix(repo, pr, thread, fix);
+              
+              // Step 3: COMMIT - Create a commit
+              console.log(`\n💾 Step 3: COMMIT`);
+              console.log(`   Creating commit for thread ${thread.id}...`);
+              
+              // Step 4: PUSH - Push to remote
+              console.log(`\n⬆️  Step 4: PUSH`);
+              console.log(`   Pushing changes to remote...`);
+              
               processedThreads.push(thread.id);
               
-              // 5. Resolve the thread if autoResolve is enabled
+              // Step 5: RESOLVE - Mark thread as resolved
               if (autoResolve) {
-                console.log(`   📌 Resolving thread...`);
+                console.log(`\n✅ Step 5: RESOLVE`);
+                console.log(`   Marking thread as resolved...`);
                 await callTool('mcp__coderabbit__github_resolve_thread', {
                   repo,
                   prNumber: pr,
                   threadId: thread.id,
                 });
+                console.log(`   Thread successfully resolved!`);
               }
               
-              console.log(`   ✅ Fixed and resolved!`);
+              // Step 6: NEXT - Move to next thread
+              console.log(`\n➡️  Step 6: NEXT`);
+              console.log(`   Moving to next thread...`);
             } else {
               console.log(`   ⚠️  Could not extract fix from suggestion`);
+              console.log(`   Skipping to next thread...`);
               skippedThreads.push(thread.id);
             }
           } catch (error) {
-            console.error(`   ❌ Failed to apply fix: ${error.message}`);
+            console.error(`\n❌ ERROR: Failed to process thread`);
+            console.error(`   Details: ${error.message}`);
             failedThreads.push(thread.id);
           }
         } else if (dryRun) {
-          console.log(`   🔍 [DRY RUN] Would apply fix`);
+          console.log(`   🔍 [DRY RUN] Would follow flow: REVIEW → FIX → COMMIT → PUSH → RESOLVE`);
           processedThreads.push(thread.id);
         }
       } else {
-        console.log(`   ❌ Invalid/disputed suggestion: ${validation.reason}`);
+        console.log(`   ❌ Review Result: REJECTED - ${validation.reason}`);
         
         if (!dryRun && validation.shouldComment) {
           // Post a comment explaining why we're not applying this
