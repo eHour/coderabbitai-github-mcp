@@ -114,43 +114,14 @@ export class CodePatcherAgent {
   }
 
   private applyUnifiedDiff(original: string, patchStr: string): string {
-    // Parse and apply unified diff
-    const patches = diff.parsePatch(patchStr);
-    
-    if (patches.length === 0) {
-      throw new Error('Invalid patch format');
+    const patched = diff.applyPatch(original, patchStr);
+    if (patched === false) {
+      throw new Error('Failed to apply patch');
     }
-
-    let result = original;
-    
-    for (const patch of patches) {
-      for (const hunk of patch.hunks || []) {
-        result = this.applyHunk(result, hunk);
-      }
-    }
-
-    return result;
+    return patched;
   }
 
-  private applyHunk(content: string, hunk: any): string {
-    const lines = content.split('\n');
-    const startLine = hunk.oldStart - 1; // Convert to 0-based index
-    
-    // Remove old lines and add new lines
-    const toRemove = hunk.oldLines;
-    const newLines: string[] = [];
-    
-    for (const change of hunk.lines) {
-      if (change.startsWith('+')) {
-        newLines.push(change.substring(1));
-      }
-    }
-    
-    // Apply the changes
-    lines.splice(startLine, toRemove, ...newLines);
-    
-    return lines.join('\n');
-  }
+  // Removed custom applyHunk; rely on diff.applyPatch
 
   async commitAndPush(
     _repo: string,
