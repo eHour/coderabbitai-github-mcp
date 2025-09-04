@@ -8,6 +8,7 @@ export class MonitorAgent {
   private logger = new Logger('Monitor');
   private githubAgent: GitHubAPIAgent;
   private pollingIntervals = new Map<string, NodeJS.Timeout>();
+  private lastSeenCommentId = new Map<string, string>();
 
   constructor(
     private messageBus: MessageBus,
@@ -71,12 +72,20 @@ export class MonitorAgent {
         const threadsResult = await this.githubAgent.listReviewThreads(repo, prNumber, false);
         
         // Check for new CodeRabbit responses
-        const codeRabbitThreads = threadsResult.threads.filter(t => {
-          // Check if CodeRabbit has responded after our last comment
+        const updates: typeof threadsResult.threads = [];
+        for (const t of threadsResult.threads) {
           const lastComment = t.comments[t.comments.length - 1];
-          return lastComment.author.login === 'coderabbitai';
-        });
+          if (lastComment.author.login === 'coderabbitai') {
+            const prevId = this.lastSeenCommentId.get(t.id);
+            if (lastComment.id !== prevId) {
+              updates.push(t);
+              this.lastSeenCommentId.set(t.id, lastComment.id);
+            }
+          }
+        }
 
+        const codeRabbitThreads = updates;
+        
         if (codeRabbitThreads.length > 0) {
           this.logger.info(`Found ${codeRabbitThreads.length} threads with new CodeRabbit responses`);
           
@@ -123,6 +132,7 @@ export class MonitorAgent {
       this.logger.info(`Stopped polling for ${key}`);
     }
     this.pollingIntervals.clear();
+    this.lastSeenCommentId.clear();
   }
 
   async checkPRStatus(repo: string, prNumber: number): Promise<{
