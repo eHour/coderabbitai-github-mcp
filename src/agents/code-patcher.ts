@@ -24,9 +24,16 @@ export class CodePatcherAgent {
 
   private setupMessageHandlers() {
     this.messageBus.subscribe('code-patcher', async (message) => {
-      if (message.type === 'APPLY_PATCH') {
-        const result = await this.applyPatch(message.payload);
-        this.messageBus.respond(message, result);
+      if (message.type !== 'APPLY_PATCH') return;
+      try {
+        await this.applyPatch(message.payload);
+        this.messageBus.respond(message, { success: true });
+      } catch (error) {
+        this.logger.error(`Failed to apply patch`, error);
+        this.messageBus.respond(message, {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     });
   }
