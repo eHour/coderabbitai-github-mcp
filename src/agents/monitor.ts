@@ -42,7 +42,7 @@ export class MonitorAgent {
     const result = await this.githubAgent.waitForCheckRuns(
       repo,
       commitSha,
-      Math.floor(this.config.ci.waitTimeout / this.config.ci.checkInterval),
+      Math.max(1, Math.floor(this.config.ci.waitTimeout / this.config.ci.checkInterval)),
       this.config.ci.checkInterval
     );
 
