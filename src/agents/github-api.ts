@@ -2,12 +2,14 @@ import { graphql } from '@octokit/graphql';
 import { Octokit } from '@octokit/rest';
 import { MessageBus } from '../lib/message-bus.js';
 import { Logger } from '../lib/logger.js';
+import { RateLimiter } from '../lib/rate-limiter.js';
 import { Config, ReviewThread, PullRequest, CheckRunConclusion } from '../types/index.js';
 
 export class GitHubAPIAgent {
   private logger = new Logger('GitHubAPI');
   private graphqlClient: typeof graphql;
   private restClient: Octokit;
+  private rateLimiter: RateLimiter;
 
   constructor(
     private messageBus: MessageBus,
@@ -23,6 +25,17 @@ export class GitHubAPIAgent {
       auth: config.github.token,
     });
 
+    // Initialize rate limiter with config
+    this.rateLimiter = new RateLimiter(
+      config.rateLimit || {
+        maxRequestsPerHour: 50,
+        maxRequestsPerMinute: 10,
+        maxConcurrent: 3,
+        backoffMultiplier: 2,
+        maxBackoffMs: 300000
+      }
+    );
+
     this.setupMessageHandlers();
   }
 
@@ -30,6 +43,10 @@ export class GitHubAPIAgent {
     this.messageBus.subscribe('github-api', async (message) => {
       this.logger.debug(`Received message: ${message.type}`);
     });
+  }
+
+  getRateLimitStatus(): any {
+    return this.rateLimiter.getStatus();
   }
 
   async getPRMeta(repo: string, prNumber: number): Promise<PullRequest> {
@@ -75,17 +92,29 @@ export class GitHubAPIAgent {
   async listReviewThreads(
     repo: string,
     prNumber: number,
-    onlyUnresolved = true
-  ): Promise<ReviewThread[]> {
-    this.logger.info(`Fetching review threads for ${repo}#${prNumber}`);
+    onlyUnresolved = true,
+    page: number = 1,
+    pageSize: number = 10
+  ): Promise<{ threads: ReviewThread[]; totalCount: number; hasMore: boolean }> {
+    this.logger.info(`Fetching review threads for ${repo}#${prNumber} (page ${page}, size ${pageSize})`);
     
     const [owner, name] = repo.split('/');
     
+    // Constrain pageSize to reasonable limits
+    pageSize = Math.min(Math.max(1, pageSize), 50);
+    
+    // We'll fetch all threads with pagination support
+    // For now, fetching up to 100 threads total (can be extended with cursor pagination if needed)
     const query = `
-      query($owner: String!, $name: String!, $number: Int!) {
+      query($owner: String!, $name: String!, $number: Int!, $first: Int!) {
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
-            reviewThreads(first: 100) {
+            reviewThreads(first: $first) {
+              totalCount
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
               nodes {
                 id
                 isResolved
@@ -94,7 +123,7 @@ export class GitHubAPIAgent {
                 path
                 line
                 startLine
-                comments(first: 50) {
+                comments(first: 10) {
                   nodes {
                     id
                     body
@@ -111,13 +140,16 @@ export class GitHubAPIAgent {
       }
     `;
 
+    // For simplicity, fetch up to 100 threads initially
     const response = await this.graphqlClient<any>(query, {
       owner,
       name,
       number: prNumber,
+      first: 100
     });
 
-    const threads = response.repository.pullRequest.reviewThreads.nodes;
+    const reviewThreads = response.repository.pullRequest.reviewThreads;
+    const threads = reviewThreads.nodes;
     
     // Filter and transform threads
     const result: ReviewThread[] = [];
@@ -159,7 +191,12 @@ export class GitHubAPIAgent {
     }
 
     this.logger.info(`Found ${result.length} ${onlyUnresolved ? 'unresolved ' : ''}review threads`);
-    return result;
+    
+    return {
+      threads: result,
+      totalCount: reviewThreads.totalCount,
+      hasMore: reviewThreads.pageInfo.hasNextPage
+    };
   }
 
   async postComment(
@@ -167,19 +204,24 @@ export class GitHubAPIAgent {
     prNumber: number,
     threadId: string,
     body: string
-  ): Promise<void> {
+  ): Promise<{ success: boolean; commentId?: string }> {
     if (!body.startsWith('@coderabbitai')) {
       body = `@coderabbitai ${body}`;
     }
 
     if (this.config.dry_run) {
       this.logger.dryRun('post comment', { repo, prNumber, threadId, body });
-      return;
+      return { success: true };
     }
+
+    // Rate limiting check
+    await this.rateLimiter.waitForLimit();
+    this.rateLimiter.startRequest();
 
     this.logger.info(`Posting comment to thread ${threadId}`);
     
-    const mutation = `
+    try {
+      const mutation = `
       mutation($threadId: ID!, $body: String!) {
         addPullRequestReviewThreadReply(input: {
           pullRequestReviewThreadId: $threadId,
@@ -192,23 +234,44 @@ export class GitHubAPIAgent {
       }
     `;
 
-    await this.graphqlClient(mutation, {
-      threadId,
-      body,
-    });
+      const response = await this.graphqlClient<any>(mutation, {
+        threadId,
+        body,
+      });
+      
+      this.rateLimiter.endRequest(true);
+      return { 
+        success: true, 
+        commentId: response.addPullRequestReviewThreadReply?.comment?.id 
+      };
+    } catch (error: any) {
+      this.rateLimiter.endRequest(false);
+      
+      // Check if it's a rate limit error
+      const errorMessage = error.message || '';
+      const rateLimitMatch = errorMessage.match(/wait (\d+) minutes? and (\d+) seconds?/i);
+      if (rateLimitMatch) {
+        const minutes = parseInt(rateLimitMatch[1] || '0', 10);
+        const seconds = parseInt(rateLimitMatch[2] || '0', 10);
+        this.rateLimiter.handleRateLimitError(minutes, seconds);
+        this.logger.error(`CodeRabbit rate limit: wait ${minutes}m ${seconds}s`);
+      }
+      
+      throw error;
+    }
   }
 
-  async resolveThread(repo: string, prNumber: number, threadId: string): Promise<void> {
+  async resolveThread(repo: string, prNumber: number, threadId: string): Promise<{ success: boolean }> {
     if (this.config.dry_run) {
       this.logger.dryRun('resolve thread', { repo, prNumber, threadId });
-      return;
+      return { success: true };
     }
 
     this.logger.info(`Resolving thread ${threadId}`);
     
     const mutation = `
       mutation($threadId: ID!) {
-        resolvePullRequestReviewThread(input: {
+        resolveReviewThread(input: {
           threadId: $threadId
         }) {
           thread {
@@ -222,6 +285,8 @@ export class GitHubAPIAgent {
     await this.graphqlClient(mutation, {
       threadId,
     });
+    
+    return { success: true };
   }
 
   async waitForCheckRuns(
