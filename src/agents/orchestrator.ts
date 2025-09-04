@@ -246,6 +246,9 @@ export class OrchestratorAgent {
       this.logger.error('Orchestration failed', error);
       result.success = false;
       result.errors.push(error instanceof Error ? error.message : String(error));
+    } finally {
+      // Stop any active polling for this PR
+      this.monitorAgent.stopPolling(repo, prNumber);
     }
 
     return result;
