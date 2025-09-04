@@ -88,7 +88,9 @@ export class CodePatcherAgent {
     const resolvedPath = path.resolve(fullPath);
     
     // Prevent path traversal attacks
-    if (!resolvedPath.startsWith(path.resolve(this.workDir))) {
+    const base = path.resolve(this.workDir);
+    const rel = path.relative(base, resolvedPath);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
       throw new Error(`Path traversal detected: ${actualFilePath}`);
     }
     
