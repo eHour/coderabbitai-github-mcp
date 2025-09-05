@@ -105,7 +105,7 @@ A Model Context Protocol (MCP) server that automates CodeRabbit PR review resolu
 
 ### 1. Start Claude Code in Project Directory
 ```bash
-cd /home/thies/projects/ehour/ehourp/tools/coderabbitai-github-mcp
+cd /path/to/coderabbitai-github-mcp
 claude
 ```
 
