@@ -29,7 +29,7 @@ export class MessageBus extends EventEmitter {
     const fullMessage: AgentMessage = {
       ...message,
       id: uuidv4(),
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
 
     this.messageLog.push(fullMessage);
@@ -56,7 +56,7 @@ export class MessageBus extends EventEmitter {
       ...message,
       id: messageId,
       correlationId: message.correlationId ?? messageId,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
 
     return new Promise((resolve, reject) => {
@@ -114,7 +114,7 @@ export class MessageBus extends EventEmitter {
       target: `${originalMessage.source}-response`,
       payload: response,
       correlationId: originalMessage.id,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
 
     this.messageLog.push(responseMessage);

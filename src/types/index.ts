@@ -63,7 +63,7 @@ export interface AgentMessage {
   target: string;
   payload: any;
   correlationId: string;
-  timestamp: Date;
+  timestamp: string; // ISO 8601
 }
 
 export interface PatchRequest {
@@ -120,3 +120,18 @@ export type CheckRunConclusion =
   | 'stale'
   | 'timed_out'
   | null;
+
+export interface WorkflowInstruction {
+  current_step: 'start' | 'validate' | 'apply' | 'challenge' | 'next' | 'complete';
+  instruction: string;
+  next_tool?: string;
+  next_params?: Record<string, any>;
+  validation_criteria?: string[];
+  progress?: string;
+  reminder?: string;
+}
+
+export interface WorkflowToolResponse<T = any> {
+  data: T;
+  workflow: WorkflowInstruction;
+}
