@@ -58,9 +58,9 @@ export class RateLimiter {
 
     // Check hourly limit
     const requestsInLastHour = this.requestTimestamps.length;
-    if (requestsInLastHour >= this.config.maxRequestsPerHour) {
-      const oldestInWindow = Math.min(...this.requestTimestamps);
-      const waitMs = oldestInWindow + 3600000 - now;
+    if (requestsInLastHour >= this.config.maxRequestsPerHour && this.requestTimestamps.length > 0) {
+      const oldestInWindow = this.requestTimestamps.reduce((min, ts) => ts < min ? ts : min, this.requestTimestamps[0]);
+      const waitMs = Math.max(0, oldestInWindow + 3600000 - now);
       return {
         allowed: false,
         waitMs,
@@ -69,10 +69,11 @@ export class RateLimiter {
     }
 
     // Check minute limit
-    const requestsInLastMinute = this.requestTimestamps.filter(ts => ts > oneMinuteAgo).length;
-    if (requestsInLastMinute >= this.config.maxRequestsPerMinute) {
-      const oldestInMinute = Math.min(...this.requestTimestamps.filter(ts => ts > oneMinuteAgo));
-      const waitMs = oldestInMinute + 60000 - now;
+    const lastMinute = this.requestTimestamps.filter(ts => ts > oneMinuteAgo);
+    const requestsInLastMinute = lastMinute.length;
+    if (requestsInLastMinute >= this.config.maxRequestsPerMinute && lastMinute.length > 0) {
+      const oldestInMinute = lastMinute.reduce((min, ts) => ts < min ? ts : min, lastMinute[0]);
+      const waitMs = Math.max(0, oldestInMinute + 60000 - now);
       return {
         allowed: false,
         waitMs,
