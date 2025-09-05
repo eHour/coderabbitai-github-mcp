@@ -9,6 +9,7 @@ export class MonitorAgent {
   private githubAgent: GitHubAPIAgent;
   private pollingIntervals = new Map<string, NodeJS.Timeout>();
   private lastSeenCommentId = new Map<string, string>();
+  private activePollsInProgress = new Set<string>();
 
   constructor(
     private messageBus: MessageBus,
@@ -67,6 +68,13 @@ export class MonitorAgent {
     this.logger.info(`Starting to poll for updates on ${key}`);
     
     const poll = async () => {
+      // Skip if a poll is already in progress for this PR
+      if (this.activePollsInProgress.has(key)) {
+        this.logger.debug(`Skipping poll for ${key} - previous poll still in progress`);
+        return;
+      }
+      
+      this.activePollsInProgress.add(key);
       try {
         // Get latest comments
         const threadsResult = await this.githubAgent.listReviewThreads(repo, prNumber, false);
@@ -104,6 +112,8 @@ export class MonitorAgent {
         }
       } catch (error) {
         this.logger.error('Polling failed', error);
+      } finally {
+        this.activePollsInProgress.delete(key);
       }
     };
 
@@ -122,6 +132,7 @@ export class MonitorAgent {
     if (interval) {
       clearInterval(interval);
       this.pollingIntervals.delete(key);
+      this.activePollsInProgress.delete(key);
       this.logger.info(`Stopped polling for ${key}`);
     }
   }
@@ -132,6 +143,7 @@ export class MonitorAgent {
       this.logger.info(`Stopped polling for ${key}`);
     }
     this.pollingIntervals.clear();
+    this.activePollsInProgress.clear();
     this.lastSeenCommentId.clear();
   }
 
