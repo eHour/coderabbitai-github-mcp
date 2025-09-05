@@ -368,7 +368,13 @@ class CodeRabbitMCPServer {
 }
 
 // Start server
-const server = new CodeRabbitMCPServer();
+let server: CodeRabbitMCPServer;
+try {
+  server = new CodeRabbitMCPServer();
+} catch (error) {
+  logger.error('Failed to initialize server', error);
+  process.exit(1);
+}
 server.start().catch((error) => {
   logger.error('Failed to start server', error);
   process.exit(1);
