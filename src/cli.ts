@@ -87,6 +87,7 @@ program
 
       if (options.dryRun) {
         process.env.DRY_RUN = 'true';
+        Logger.setDryRun(true);
       }
 
       // For testing, we can directly invoke the orchestrator

@@ -1,7 +1,7 @@
 import winston from 'winston';
 
 const logLevel = process.env.LOG_LEVEL || 'info';
-const isDryRun = process.env.DRY_RUN === 'true';
+let isDryRun = process.env.DRY_RUN === 'true';
 
 const customFormat = winston.format.printf(({ level, message, timestamp, context, ...metadata }) => {
   let msg = `${timestamp} [${level.toUpperCase()}] ${context ? `[${context}] ` : ''}${message}`;
@@ -28,6 +28,8 @@ const logger = winston.createLogger({
     new winston.transports.Console({
       format: winston.format.combine(
         winston.format.colorize(),
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        winston.format.errors({ stack: true }),
         customFormat
       ),
     }),
@@ -100,6 +102,10 @@ export class Logger {
 
   static setLogLevel(level: string): void {
     logger.level = level;
+  }
+
+  static setDryRun(enabled: boolean): void {
+    isDryRun = enabled;
   }
 
   static enableFileLogging(filename: string): void {
