@@ -15,7 +15,15 @@ export class RateLimiter {
   private backoffUntil: number = 0;
   private consecutiveErrors = 0;
 
-  constructor(private config: RateLimitConfig) {}
+  constructor(private config: RateLimitConfig) {
+    const problems: string[] = [];
+    if (config.maxRequestsPerHour <= 0) problems.push('maxRequestsPerHour must be > 0');
+    if (config.maxRequestsPerMinute <= 0) problems.push('maxRequestsPerMinute must be > 0');
+    if (config.maxConcurrent <= 0) problems.push('maxConcurrent must be > 0');
+    if (config.backoffMultiplier < 1) problems.push('backoffMultiplier must be >= 1');
+    if (config.maxBackoffMs <= 0) problems.push('maxBackoffMs must be > 0');
+    if (problems.length) throw new Error(`Invalid RateLimitConfig: ${problems.join(', ')}`);
+  }
 
   /**
    * Check if we can make a request based on rate limits
