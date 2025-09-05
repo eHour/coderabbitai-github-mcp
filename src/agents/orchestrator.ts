@@ -404,6 +404,12 @@ export class OrchestratorAgent {
           this.logger.warn(errMsg);
           result.errors.push(errMsg);
           // Mark as needs review since patch couldn't be applied
+          await this.stateManager.batchUpdateThreadStates(
+            validFixes.map(f => ({
+              threadId: f.threadId,
+              state: { status: 'needs_review', lastError: errMsg },
+            }))
+          );
           for (const fix of validFixes) {
             await this.githubAgent.postComment(
               repo,
