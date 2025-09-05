@@ -1,4 +1,6 @@
 {
+  "root": true,
+  "ignorePatterns": ["dist/", "build/", "coverage/", "node_modules/"],
   "parser": "@typescript-eslint/parser",
   "plugins": ["@typescript-eslint"],
   "extends": [
