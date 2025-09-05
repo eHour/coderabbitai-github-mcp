@@ -36,7 +36,10 @@ export type ConfigInput = z.input<typeof ConfigSchema>;
 export type ConfigOutput = z.output<typeof ConfigSchema>;
 
 export const GitHubToolInputSchema = z.object({
-  repo: z.string().describe('Repository in format owner/name'),
+  repo: z
+    .string()
+    .regex(/^[^/]+\/[^/]+$/, 'Repository must be in owner/name format')
+    .describe('Repository in format owner/name'),
   prNumber: z.number().describe('Pull request number'),
 });
 
