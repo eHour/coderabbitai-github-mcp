@@ -309,7 +309,16 @@ export class OrchestratorAgent {
         
         switch (analysisResult.result) {
         case ValidationResult.VALID:
-          validFixes.push(analysisResult);
+          if (analysisResult.patch && analysisResult.patch.trim()) {
+            validFixes.push(analysisResult);
+          } else {
+            needsReviewThreads.push({
+              ...analysisResult,
+              result: ValidationResult.NEEDS_REVIEW,
+              reasoning: `${analysisResult.reasoning || 'Valid'} but no patch provided`,
+            });
+            result.needsReview++;
+          }
           break;
         case ValidationResult.INVALID:
           invalidThreads.push(analysisResult);
@@ -333,7 +342,7 @@ export class OrchestratorAgent {
           validFixes.map(f => ({
             threadId: f.threadId,
             filePath: '', // Will be extracted from patch
-            patch: f.patch!,
+            patch: f.patch!, // safe now since we checked above
           }))
         );
 
