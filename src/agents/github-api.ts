@@ -349,8 +349,8 @@ export class GitHubAPIAgent {
       await new Promise(resolve => setTimeout(resolve, waitInterval));
     }
 
-    const result: CheckRunConclusion = hasChecks ? 'timeout' : 'no_checks_found';
-    this.logger.warn(`Check runs ${result}`);
+    const result: CheckRunConclusion = hasChecks ? 'timed_out' : null;
+    this.logger.warn(`Check runs ${hasChecks ? 'timed out' : 'not found'}`);
     return result;
   }
 

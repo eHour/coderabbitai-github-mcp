@@ -110,4 +110,13 @@ export interface Config {
   max_iterations: number;
 }
 
-export type CheckRunConclusion = 'success' | 'failure' | 'timeout' | 'no_checks_found';
+export type CheckRunConclusion =
+  | 'action_required'
+  | 'cancelled'
+  | 'failure'
+  | 'neutral'
+  | 'success'
+  | 'skipped'
+  | 'stale'
+  | 'timed_out'
+  | null;
