@@ -355,7 +355,7 @@ class CodeRabbitMCPServer {
                             ],
                         };
                     }
-                    case 'run_orchestrator':
+                    case 'run_orchestrator': {
                         const result = await this.orchestrator.run(args?.repo, args?.prNumber, args?.maxIterations, args?.dryRun, args?.validationMode);
                         return {
                             content: [
@@ -365,6 +365,7 @@ class CodeRabbitMCPServer {
                                 },
                             ],
                         };
+                    }
                     // Workflow-aware tool handlers
                     case 'coderabbit_workflow_start': {
                         const response = await this.handleWorkflowStart(args?.repo, args?.prNumber);

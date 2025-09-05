@@ -393,7 +393,7 @@ class CodeRabbitMCPServer {
             };
           }
           
-          case 'run_orchestrator':
+          case 'run_orchestrator': {
             const result = await this.orchestrator.run(
               args?.repo as string,
               args?.prNumber as number,
@@ -409,6 +409,7 @@ class CodeRabbitMCPServer {
                 },
               ],
             };
+          }
 
           // Workflow-aware tool handlers
           case 'coderabbit_workflow_start': {
