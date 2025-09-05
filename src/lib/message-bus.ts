@@ -60,7 +60,6 @@ export class MessageBus extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const responseChannel = `${message.source}-response`;
-      let timeout: NodeJS.Timeout;
 
       const responseHandler = (response: AgentMessage) => {
         if (response.correlationId !== messageId) return;
@@ -70,7 +69,7 @@ export class MessageBus extends EventEmitter {
         resolve(response.payload);
       };
 
-      timeout = setTimeout(() => {
+      const timeout = setTimeout(() => {
         this.off(responseChannel, responseHandler);
         this.pendingResponses.delete(messageId);
         reject(new Error(`Request timeout: ${message.type} to ${message.target}`));
@@ -104,7 +103,7 @@ export class MessageBus extends EventEmitter {
   respond(originalMessage: AgentMessage, response: any): void {
     const responseMessage: AgentMessage = {
       id: uuidv4(),
-      type: 'RESPONSE' as any,
+      type: 'RESPONSE',
       source: originalMessage.target,
       target: `${originalMessage.source}-response`,
       payload: response,
@@ -112,6 +111,15 @@ export class MessageBus extends EventEmitter {
       timestamp: new Date(),
     };
 
+    this.messageLog.push(responseMessage);
+    if (this.messageLog.length > MAX_MESSAGE_LOG_SIZE) {
+      this.messageLog.shift();
+    }
+    
+    this.logger.debug(`Response sent: ${responseMessage.source} -> ${responseMessage.target}`, {
+      correlationId: responseMessage.correlationId,
+    });
+    
     this.emit(responseMessage.target, responseMessage);
   }
 

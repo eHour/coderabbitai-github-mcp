@@ -62,7 +62,7 @@ export class WorkerPool<T> {
     available: number;
     busy: number;
     waiting: number;
-  } {
+    } {
     return {
       total: this.available.length + this.busy.size,
       available: this.available.length,

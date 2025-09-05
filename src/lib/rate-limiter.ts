@@ -133,7 +133,7 @@ export class RateLimiter {
     concurrentRequests: number;
     inBackoff: boolean;
     backoffRemainingSec: number;
-  } {
+    } {
     const now = Date.now();
     const oneHourAgo = now - 3600000;
     const oneMinuteAgo = now - 60000;

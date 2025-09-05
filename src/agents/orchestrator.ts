@@ -310,18 +310,18 @@ export class OrchestratorAgent {
         const analysisResult = analysis.value as AnalysisResult;
         
         switch (analysisResult.result) {
-          case ValidationResult.VALID:
-            validFixes.push(analysisResult);
-            break;
-          case ValidationResult.INVALID:
-            invalidThreads.push(analysisResult);
-            result.rejected++;
-            break;
-          case ValidationResult.NEEDS_REVIEW:
-          case ValidationResult.UNPATCHABLE:
-            needsReviewThreads.push(analysisResult);
-            result.needsReview++;
-            break;
+        case ValidationResult.VALID:
+          validFixes.push(analysisResult);
+          break;
+        case ValidationResult.INVALID:
+          invalidThreads.push(analysisResult);
+          result.rejected++;
+          break;
+        case ValidationResult.NEEDS_REVIEW:
+        case ValidationResult.UNPATCHABLE:
+          needsReviewThreads.push(analysisResult);
+          result.needsReview++;
+          break;
         }
       }
 
@@ -349,7 +349,7 @@ export class OrchestratorAgent {
           );
 
           // Step 4: PUSH
-          this.logger.info(`\n⬆️  STEP 4: PUSH - Pushing changes to remote...`);
+          this.logger.info('\n⬆️  STEP 4: PUSH - Pushing changes to remote...');
           this.logger.info(`   Commit SHA: ${commitSha}`);
           await this.stateManager.markThreadsAsPushed(
             validFixes.map(f => f.threadId),
@@ -357,7 +357,7 @@ export class OrchestratorAgent {
           );
 
           // Wait for CI
-          this.logger.info(`\n🔄 Waiting for CI checks to complete...`);
+          this.logger.info('\n🔄 Waiting for CI checks to complete...');
           const ciResult = await this.monitorAgent.waitForCI(repo, prNumber, commitSha);
 
           if (ciResult === 'success') {
@@ -376,7 +376,7 @@ export class OrchestratorAgent {
             this.logger.info(`   Successfully resolved all ${validFixes.length} threads!`);
             
             // Step 6: NEXT
-            this.logger.info(`\n➡️  STEP 6: NEXT - Moving to next iteration...`);
+            this.logger.info('\n➡️  STEP 6: NEXT - Moving to next iteration...');
           } else {
             // CI failed - revert and notify
             this.logger.warn('CI failed, reverting commit');
@@ -435,7 +435,7 @@ export class OrchestratorAgent {
       for (const needsReview of needsReviewThreads) {
         if (!dryRun) {
           const message = needsReview.result === ValidationResult.UNPATCHABLE
-            ? `@coderabbitai I could not apply this suggestion as the patch failed. The surrounding code may have changed. Please provide an updated suggestion.`
+            ? '@coderabbitai I could not apply this suggestion as the patch failed. The surrounding code may have changed. Please provide an updated suggestion.'
             : `@coderabbitai This suggestion requires human review. My analysis confidence is below threshold (${Math.round(needsReview.confidence * 100)}%). Could you clarify the expected behavior?`;
           
           await this.githubAgent.postComment(repo, prNumber, needsReview.threadId, message);
@@ -468,31 +468,31 @@ export class OrchestratorAgent {
   async executeTool(name: string, args: any): Promise<any> {
     // Delegate tool execution to appropriate agents
     switch (name) {
-      case 'github_get_pr_meta':
-        return await this.githubAgent.getPRMeta(args.repo, args.prNumber);
-      case 'github_list_review_threads':
-        return await this.githubAgent.listReviewThreads(
-          args.repo,
-          args.prNumber,
-          args.onlyUnresolved,
-          args.page,
-          args.pageSize
-        );
-      case 'github_post_review_comment':
-        return await this.githubAgent.postComment(
-          args.repo,
-          args.prNumber,
-          args.threadId,
-          args.body
-        );
-      case 'github_resolve_thread':
-        return await this.githubAgent.resolveThread(
-          args.repo,
-          args.prNumber,
-          args.threadId
-        );
-      default:
-        throw new Error(`Unknown tool: ${name}`);
+    case 'github_get_pr_meta':
+      return await this.githubAgent.getPRMeta(args.repo, args.prNumber);
+    case 'github_list_review_threads':
+      return await this.githubAgent.listReviewThreads(
+        args.repo,
+        args.prNumber,
+        args.onlyUnresolved,
+        args.page,
+        args.pageSize
+      );
+    case 'github_post_review_comment':
+      return await this.githubAgent.postComment(
+        args.repo,
+        args.prNumber,
+        args.threadId,
+        args.body
+      );
+    case 'github_resolve_thread':
+      return await this.githubAgent.resolveThread(
+        args.repo,
+        args.prNumber,
+        args.threadId
+      );
+    default:
+      throw new Error(`Unknown tool: ${name}`);
     }
   }
 }

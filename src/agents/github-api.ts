@@ -159,8 +159,13 @@ export class GitHubAPIAgent {
       first: 100
     });
 
-    const reviewThreads = response.repository.pullRequest.reviewThreads;
-    const threads = reviewThreads.nodes;
+    const prNode = response?.repository?.pullRequest;
+    if (!prNode) {
+      this.logger.warn(`PR #${prNumber} not found or not accessible in ${repo}`);
+      return { threads: [], totalCount: 0, hasMore: false };
+    }
+    const reviewThreads = prNode.reviewThreads ?? { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] };
+    const threads = reviewThreads.nodes ?? [];
     
     // Filter and transform threads
     const result: ReviewThread[] = [];
@@ -201,12 +206,17 @@ export class GitHubAPIAgent {
       });
     }
 
-    this.logger.info(`Found ${result.length} ${onlyUnresolved ? 'unresolved ' : ''}review threads`);
+    // Apply simple paging over filtered results
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const paged = result.slice(start, end);
+    const hasMore = end < result.length || (reviewThreads.pageInfo?.hasNextPage === true);
+    this.logger.info(`Returning ${paged.length}/${result.length} threads (page ${page}, size ${pageSize})`);
     
     return {
-      threads: result,
+      threads: paged,
       totalCount: reviewThreads.totalCount,
-      hasMore: reviewThreads.pageInfo.hasNextPage
+      hasMore
     };
   }
 
@@ -228,7 +238,7 @@ export class GitHubAPIAgent {
     // Rate limiting check
     await this.rateLimiter.waitForLimit();
     this.rateLimiter.startRequest();
-
+    let ok = false;
     this.logger.info(`Posting comment to thread ${threadId}`);
     
     try {
@@ -250,14 +260,12 @@ export class GitHubAPIAgent {
         body,
       });
       
-      this.rateLimiter.endRequest(true);
+      ok = true;
       return { 
         success: true, 
         commentId: response.addPullRequestReviewThreadReply?.comment?.id 
       };
     } catch (error: any) {
-      this.rateLimiter.endRequest(false);
-      
       // Check if it's a rate limit error
       const errorMessage = error.message || '';
       const rateLimitMatch = errorMessage.match(/wait (\d+) minutes? and (\d+) seconds?/i);
@@ -265,10 +273,12 @@ export class GitHubAPIAgent {
         const minutes = parseInt(rateLimitMatch[1] || '0', 10);
         const seconds = parseInt(rateLimitMatch[2] || '0', 10);
         this.rateLimiter.handleRateLimitError(minutes, seconds);
-        this.logger.error(`CodeRabbit rate limit: wait ${minutes}m ${seconds}s`);
+        this.logger.error(`GitHub rate limit: wait ${minutes}m ${seconds}s`);
       }
       
       throw error;
+    } finally {
+      this.rateLimiter.endRequest(ok);
     }
   }
 

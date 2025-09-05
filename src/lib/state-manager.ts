@@ -57,6 +57,7 @@ export class StateManager {
     updates: Array<{ threadId: string; state: Partial<ThreadState> }>
   ): Promise<void> {
     const release = await this.mutex.acquire();
+    const notifications: Array<{ threadId: string; state: ThreadState }> = [];
     try {
       for (const { threadId, state } of updates) {
         const currentState = this.state.get(threadId) || {
@@ -67,12 +68,17 @@ export class StateManager {
         
         const newState = { ...currentState, ...state };
         this.state.set(threadId, newState);
-        this.notifyListeners(threadId, newState);
+        notifications.push({ threadId, state: newState });
       }
       
       this.logger.debug(`Batch updated ${updates.length} thread states`);
     } finally {
       release();
+    }
+    
+    // Notify listeners outside the lock
+    for (const { threadId, state } of notifications) {
+      this.notifyListeners(threadId, state);
     }
   }
 
@@ -105,6 +111,7 @@ export class StateManager {
 
   async markThreadsAsProcessing(threadIds: string[]): Promise<void> {
     const release = await this.mutex.acquire();
+    const notifications: Array<{ threadId: string; state: ThreadState }> = [];
     try {
       for (const threadId of threadIds) {
         const state = this.state.get(threadId) || {
@@ -116,31 +123,43 @@ export class StateManager {
         state.status = 'processing';
         state.attempts++;
         this.state.set(threadId, state);
-        this.notifyListeners(threadId, state);
+        notifications.push({ threadId, state });
       }
     } finally {
       release();
+    }
+    
+    // Notify listeners outside the lock
+    for (const { threadId, state } of notifications) {
+      this.notifyListeners(threadId, state);
     }
   }
 
   async markThreadsAsPushed(threadIds: string[], commitSha: string): Promise<void> {
     const release = await this.mutex.acquire();
+    const notifications: Array<{ threadId: string; state: ThreadState }> = [];
     try {
       for (const threadId of threadIds) {
         const state = this.state.get(threadId);
         if (state) {
           state.status = 'pushed';
           state.commitSha = commitSha;
-          this.notifyListeners(threadId, state);
+          notifications.push({ threadId, state });
         }
       }
     } finally {
       release();
     }
+    
+    // Notify listeners outside the lock
+    for (const { threadId, state } of notifications) {
+      this.notifyListeners(threadId, state);
+    }
   }
 
   async markThreadsAsFailed(threadIds: string[], error: string, ciRunUrl?: string): Promise<void> {
     const release = await this.mutex.acquire();
+    const notifications: Array<{ threadId: string; state: ThreadState }> = [];
     try {
       for (const threadId of threadIds) {
         const state = this.state.get(threadId);
@@ -148,11 +167,16 @@ export class StateManager {
           state.status = 'ci_failed';
           state.lastError = error;
           state.ciRunUrl = ciRunUrl;
-          this.notifyListeners(threadId, state);
+          notifications.push({ threadId, state });
         }
       }
     } finally {
       release();
+    }
+    
+    // Notify listeners outside the lock
+    for (const { threadId, state } of notifications) {
+      this.notifyListeners(threadId, state);
     }
   }
 

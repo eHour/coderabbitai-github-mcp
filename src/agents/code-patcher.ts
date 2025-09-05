@@ -29,7 +29,7 @@ export class CodePatcherAgent {
         await this.applyPatch(message.payload);
         this.messageBus.respond(message, { success: true });
       } catch (error) {
-        this.logger.error(`Failed to apply patch`, error);
+        this.logger.error('Failed to apply patch', error);
         this.messageBus.respond(message, {
           success: false,
           error: error instanceof Error ? error.message : String(error),

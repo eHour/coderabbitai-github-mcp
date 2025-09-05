@@ -55,7 +55,7 @@ export class ThreadAnalyzerAgent {
       line.trim() && 
       !line.startsWith('#') && 
       !line.includes('```') &&
-      !line.match(/^[⚠️🛠️🐛🔒⚡📚]/)
+      !line.match(/^[⚠️🛠️🐛🔒⚡📚]/u)
     ) || '';
     const preview = suggestionLine.replace(/[*_`]/g, '').trim().substring(0, 100);
     const location = thread.path ? `${thread.path}:${thread.line || '?'}` : 'no file';
@@ -258,8 +258,8 @@ Respond with JSON:
         result.confidence < this.config.validation.llm.confidenceThreshold
           ? ValidationResult.NEEDS_REVIEW
           : result.valid === true
-          ? ValidationResult.VALID
-          : ValidationResult.INVALID;
+            ? ValidationResult.VALID
+            : ValidationResult.INVALID;
 
       return {
         threadId: thread.id,
