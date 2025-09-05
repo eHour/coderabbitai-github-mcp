@@ -109,5 +109,5 @@ export const CheckRunSchema = z.object({
       'timed_out',
     ])
     .nullable(),
-  html_url: z.string(),
+  html_url: z.string().url(),
 });
