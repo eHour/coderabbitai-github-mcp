@@ -55,6 +55,7 @@ export class MessageBus extends EventEmitter {
     const fullMessage: AgentMessage = {
       ...message,
       id: messageId,
+      correlationId: (message as any).correlationId ?? messageId,
       timestamp: new Date(),
     };
 
@@ -84,6 +85,11 @@ export class MessageBus extends EventEmitter {
       if (this.messageLog.length > MAX_MESSAGE_LOG_SIZE) {
         this.messageLog.shift(); // Remove oldest message
       }
+      
+      this.logger.debug(`Request sent: ${message.source} -> ${message.target}`, {
+        type: message.type,
+        correlationId: fullMessage.correlationId,
+      });
       
       this.emit(message.target, fullMessage);
     });
