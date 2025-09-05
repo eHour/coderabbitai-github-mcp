@@ -356,11 +356,32 @@ export class GitHubAPIAgent {
       }
     `;
 
-    await this.graphqlClient(mutation, {
-      threadId,
-    });
+    // Rate limiting check - atomic acquire to prevent races
+    await this.rateLimiter.acquire();
+    let ok = false;
     
-    return { success: true };
+    try {
+      await this.graphqlClient(mutation, {
+        threadId,
+      });
+      
+      ok = true;
+      return { success: true };
+    } catch (error: any) {
+      // Check if it's a rate limit error
+      const errorMessage = error.message || '';
+      const rateLimitMatch = errorMessage.match(/wait (\d+) minutes? and (\d+) seconds?/i);
+      if (rateLimitMatch) {
+        const minutes = parseInt(rateLimitMatch[1] || '0', 10);
+        const seconds = parseInt(rateLimitMatch[2] || '0', 10);
+        this.rateLimiter.handleRateLimitError(minutes, seconds);
+        this.logger.error(`GitHub rate limit: wait ${minutes}m ${seconds}s`);
+      }
+      
+      throw error;
+    } finally {
+      this.rateLimiter.endRequest(ok);
+    }
   }
 
   async waitForCheckRuns(

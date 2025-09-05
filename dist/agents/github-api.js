@@ -171,7 +171,8 @@ export class GitHubAPIAgent {
         threads.forEach((thread, index) => {
             const authorLogin = thread.commentsFirst?.nodes?.[0]?.author?.login || 'unknown';
             if (authorLogin.includes('coderabbit')) {
-                this.logger.info(`  Thread ${index}: Author=${authorLogin}, isResolved=${thread.isResolved}, isOutdated=${thread.isOutdated}, path=${thread.path}`);
+                this.logger.info(`  Thread ${index}: Author=${authorLogin}, ` +
+                    `isResolved=${thread.isResolved}, isOutdated=${thread.isOutdated}, path=${thread.path}`);
             }
         });
         // Filter and transform threads
@@ -298,10 +299,31 @@ export class GitHubAPIAgent {
         }
       }
     `;
-        await this.graphqlClient(mutation, {
-            threadId,
-        });
-        return { success: true };
+        // Rate limiting check - atomic acquire to prevent races
+        await this.rateLimiter.acquire();
+        let ok = false;
+        try {
+            await this.graphqlClient(mutation, {
+                threadId,
+            });
+            ok = true;
+            return { success: true };
+        }
+        catch (error) {
+            // Check if it's a rate limit error
+            const errorMessage = error.message || '';
+            const rateLimitMatch = errorMessage.match(/wait (\d+) minutes? and (\d+) seconds?/i);
+            if (rateLimitMatch) {
+                const minutes = parseInt(rateLimitMatch[1] || '0', 10);
+                const seconds = parseInt(rateLimitMatch[2] || '0', 10);
+                this.rateLimiter.handleRateLimitError(minutes, seconds);
+                this.logger.error(`GitHub rate limit: wait ${minutes}m ${seconds}s`);
+            }
+            throw error;
+        }
+        finally {
+            this.rateLimiter.endRequest(ok);
+        }
     }
     async waitForCheckRuns(repo, commitSha, maxAttempts = 60, waitInterval = 10000) {
         const { owner, name } = this.parseRepo(repo);

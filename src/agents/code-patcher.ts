@@ -87,21 +87,86 @@ export class CodePatcherAgent {
     const fullPath = path.join(this.workDir, actualFilePath);
     const resolvedPath = path.resolve(fullPath);
     
-    // Prevent path traversal (incl. via symlinks) and support new files
+    // Get real path of base directory for traversal checks
     const baseReal = await fs.realpath(this.workDir);
-    const targetDir = path.dirname(resolvedPath);
-    const targetDirReal = await fs.realpath(targetDir).catch(() => targetDir); // may not exist yet
-    const relReal = path.relative(baseReal, targetDirReal);
-    if (relReal.startsWith('..') || path.isAbsolute(relReal)) {
-      throw new Error(`Path traversal (via symlink) detected: ${actualFilePath}`);
+    
+    // For new files, we need to handle missing target files properly
+    let targetReal: string;
+    try {
+      // Try to get real path of the target file (works for existing files)
+      targetReal = await fs.realpath(resolvedPath);
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') {
+        // File doesn't exist - get real path of parent directory
+        const parentDir = path.dirname(resolvedPath);
+        let parentReal: string;
+        try {
+          parentReal = await fs.realpath(parentDir);
+        } catch (parentErr: any) {
+          if (parentErr?.code === 'ENOENT') {
+            // Parent doesn't exist either - we'll need to create it
+            // Find the first existing ancestor
+            let currentPath = parentDir;
+            let existingAncestor = '';
+            while (currentPath !== path.dirname(currentPath)) {
+              try {
+                existingAncestor = await fs.realpath(currentPath);
+                break;
+              } catch {
+                currentPath = path.dirname(currentPath);
+              }
+            }
+            if (!existingAncestor) {
+              existingAncestor = baseReal;
+            }
+            parentReal = path.join(existingAncestor, path.relative(currentPath, parentDir));
+          } else {
+            throw new Error(`Cannot resolve parent directory for: ${actualFilePath} - ${parentErr.message}`);
+          }
+        }
+        // Compute intended target path
+        targetReal = path.join(parentReal, path.basename(resolvedPath));
+      } else {
+        throw err;
+      }
     }
-    // Canonical file path within verified directory
-    const targetPath = path.join(targetDirReal, path.basename(resolvedPath));
-
+    
+    // Check for path traversal
+    const relPath = path.relative(baseReal, targetReal);
+    if (relPath.startsWith('..') || path.isAbsolute(relPath)) {
+      throw new Error(`Path traversal detected: ${actualFilePath} would write outside project directory`);
+    }
+    
+    // Check that no path component between baseReal and target is a symlink
+    // This prevents writing through symlinks even if the final destination is valid
+    const pathComponents = relPath.split(path.sep).filter(Boolean);
+    let currentCheckPath = baseReal;
+    for (const component of pathComponents) {
+      currentCheckPath = path.join(currentCheckPath, component);
+      try {
+        const stat = await fs.lstat(currentCheckPath);
+        if (stat.isSymbolicLink()) {
+          throw new Error(
+            `Refusing to write through symlink at: ${currentCheckPath} while writing to ${actualFilePath}`
+          );
+        }
+      } catch (err: any) {
+        if (err?.code !== 'ENOENT') {
+          // ENOENT is fine - means we're creating a new path
+          if (err.message?.includes('Refusing to write through symlink')) {
+            throw err; // Re-throw our own error
+          }
+          throw new Error(`Error checking path component ${currentCheckPath}: ${err.message}`);
+        }
+        // Path doesn't exist yet, which is fine for new files
+        break;
+      }
+    }
+    
     // Read current file content (treat ENOENT as new file)
     let currentContent = '';
     try {
-      currentContent = await fs.readFile(targetPath, 'utf-8');
+      currentContent = await fs.readFile(targetReal, 'utf-8');
     } catch (err: any) {
       if (err?.code !== 'ENOENT') throw err;
     }
@@ -109,18 +174,22 @@ export class CodePatcherAgent {
     // Apply the patch
     const patchedContent = this.applyUnifiedDiff(currentContent, patchStr);
     
-    // Ensure directory exists and refuse writing to symlinks
-    await fs.mkdir(targetDirReal, { recursive: true });
+    // Ensure directory exists (create if needed)
+    const targetDir = path.dirname(targetReal);
+    await fs.mkdir(targetDir, { recursive: true });
+    
+    // Final check: make sure target is not a symlink (for existing files)
     try {
-      const st = await fs.lstat(targetPath);
+      const st = await fs.lstat(targetReal);
       if (st.isSymbolicLink()) {
         throw new Error(`Refusing to write to symlink: ${actualFilePath}`);
       }
     } catch (err: any) {
       if (err?.code !== 'ENOENT') throw err; // ok if file doesn't exist yet
     }
-    // Write the patched content back
-    await fs.writeFile(targetPath, patchedContent);
+    
+    // Write the patched content to the resolved target path
+    await fs.writeFile(targetReal, patchedContent);
     
     this.logger.info(`Applied patch to ${actualFilePath}`);
   }
