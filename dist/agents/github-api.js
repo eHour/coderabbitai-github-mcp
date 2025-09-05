@@ -148,13 +148,22 @@ export class GitHubAPIAgent {
         }
         const reviewThreads = prNode.reviewThreads ?? { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] };
         const threads = reviewThreads.nodes ?? [];
+        // Diagnostic logging to debug thread detection
+        this.logger.info(`Raw threads from GitHub API for PR #${prNumber}: ${threads.length} total`);
+        threads.forEach((thread, index) => {
+            const authorLogin = thread.commentsFirst?.nodes?.[0]?.author?.login || 'unknown';
+            if (authorLogin.includes('coderabbit')) {
+                this.logger.info(`  Thread ${index}: Author=${authorLogin}, isResolved=${thread.isResolved}, isOutdated=${thread.isOutdated}, path=${thread.path}`);
+            }
+        });
         // Filter and transform threads
         const result = [];
         for (const thread of threads) {
             if (onlyUnresolved && thread.isResolved) {
                 continue;
             }
-            if (thread.isOutdated || thread.isCollapsed) {
+            // Skip collapsed threads but include outdated ones (they might still need resolution)
+            if (thread.isCollapsed) {
                 continue;
             }
             const rootComment = thread.commentsFirst?.nodes?.[0];

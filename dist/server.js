@@ -453,7 +453,7 @@ class CodeRabbitMCPServer {
         logger.info(`Starting workflow for ${repo}#${prNumber}`);
         // Fetch all CodeRabbit threads
         const threadsData = await this.githubAgent.listReviewThreads(repo, prNumber, true);
-        const coderabbitThreads = threadsData.threads.filter(t => t.author.login === 'coderabbitai' && !t.isResolved);
+        const coderabbitThreads = threadsData.threads.filter(t => (t.author.login === 'coderabbitai[bot]' || t.author.login === 'coderabbitai') && !t.isResolved);
         if (coderabbitThreads.length === 0) {
             return {
                 data: {
