@@ -73,7 +73,7 @@ export class ThreadAnalyzerAgent {
       // First, try heuristics
       const heuristicResult = this.applyHeuristics(suggestion, thread);
       if (heuristicResult) {
-        this.logger.info(`✅ Heuristic Result: ${heuristicResult.result.toUpperCase()}`);
+        this.logger.info(`✅ Heuristic Result: ${String(heuristicResult.result).toUpperCase()}`);
         this.logger.info(`   Reason: ${heuristicResult.reasoning}`);
         this.logger.info(`   Confidence: ${(heuristicResult.confidence * 100).toFixed(0)}%`);
         return heuristicResult;
