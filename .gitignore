@@ -97,6 +97,7 @@ debug/
 # MCP specific
 coderabbit-mcp.json.backup
 *.mcp.log
+claude_desktop_config.json
 
 # Git
 .git/

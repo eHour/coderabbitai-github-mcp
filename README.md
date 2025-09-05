@@ -107,6 +107,34 @@ npx mcp-coderabbit server
 
 This starts the MCP server that can be used by MCP clients.
 
+#### Claude Desktop Configuration
+
+To use with Claude Desktop app:
+
+1. Copy the example configuration:
+   ```bash
+   cp claude_desktop_config.example.json claude_desktop_config.json
+   ```
+
+2. Edit `claude_desktop_config.json` and set your GitHub token:
+   ```json
+   {
+     "mcpServers": {
+       "coderabbit": {
+         "command": "node",
+         "args": ["./dist/server.js"],
+         "env": {
+           "GITHUB_TOKEN": "your_actual_token_here"
+         }
+       }
+     }
+   }
+   ```
+
+3. Add this configuration to your Claude Desktop settings
+
+Note: The actual `claude_desktop_config.json` is gitignored to prevent accidental token commits.
+
 ## Configuration
 
 Create a `coderabbit-mcp.json` file in your project root:
