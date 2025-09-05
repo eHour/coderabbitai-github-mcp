@@ -26,7 +26,7 @@ export class StateManager {
     let callbacks: Array<(s: ThreadState) => void> = [];
     try {
       const currentState = this.state.get(threadId);
-      newState = updater(currentState);
+      newState = { ...updater(currentState), threadId };
       
       this.state.set(threadId, newState);
       this.logger.debug(`Thread state updated: ${threadId}`, {
