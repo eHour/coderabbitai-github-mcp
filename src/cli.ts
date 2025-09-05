@@ -81,6 +81,9 @@ program
       if (!Number.isInteger(options.pr) || options.pr <= 0) {
         throw new Error('Invalid --pr. Must be a positive integer');
       }
+      if (!Number.isInteger(options.maxIterations) || options.maxIterations <= 0) {
+        throw new Error('Invalid --max-iterations. Must be a positive integer');
+      }
 
       const config = loadConfig();
       validateGitHubToken(config);
