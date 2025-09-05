@@ -114,9 +114,13 @@ export class CodePatcherAgent {
 
   private extractFilePathFromPatch(patchStr: string): string | null {
     // Extract file path from unified diff header
-    const match = patchStr.match(/^--- a?\/(.+)$/m) || 
-                  patchStr.match(/^\+\+\+ b?\/(.+)$/m);
-    return match ? match[1] : null;
+    const match = patchStr.match(/^---\s+(?:a\/)?(.+)$/m) ||
+                  patchStr.match(/^\+\+\+\s+(?:b\/)?(.+)$/m);
+    if (!match) return null;
+    const p = match[1].trim();
+    // Ignore special device paths
+    if (p === '/dev/null' || p === 'dev/null' || p.toUpperCase() === 'NUL') return null;
+    return p;
   }
 
   private applyUnifiedDiff(original: string, patchStr: string): string {
