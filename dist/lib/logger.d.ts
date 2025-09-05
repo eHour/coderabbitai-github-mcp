@@ -8,6 +8,7 @@ export declare class Logger {
     thread(threadId: string, message: string, metadata?: Record<string, unknown>): void;
     dryRun(action: string, details: unknown): void;
     static setLogLevel(level: string): void;
+    static setDryRun(enabled: boolean): void;
     static enableFileLogging(filename: string): void;
 }
 //# sourceMappingURL=logger.d.ts.map

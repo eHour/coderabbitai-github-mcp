@@ -56,6 +56,7 @@ export class GitHubAPIAgent {
             title
             state
             isDraft
+            merged
             baseRefName
             headRefName
             headRefOid
@@ -75,7 +76,7 @@ export class GitHubAPIAgent {
         return {
             number: pr.number,
             title: pr.title,
-            state: pr.state.toLowerCase(),
+            state: pr.merged ? 'merged' : pr.state.toLowerCase(),
             isDraft: pr.isDraft,
             baseRef: pr.baseRefName,
             headRef: pr.headRefName,
@@ -107,7 +108,17 @@ export class GitHubAPIAgent {
                 path
                 line
                 startLine
-                comments(first: 10) {
+                commentsFirst: comments(first: 1) {
+                  nodes {
+                    id
+                    body
+                    author {
+                      login
+                    }
+                    createdAt
+                  }
+                }
+                commentsLast: comments(last: 1) {
                   nodes {
                     id
                     body
@@ -130,8 +141,13 @@ export class GitHubAPIAgent {
             number: prNumber,
             first: 100
         });
-        const reviewThreads = response.repository.pullRequest.reviewThreads;
-        const threads = reviewThreads.nodes;
+        const prNode = response?.repository?.pullRequest;
+        if (!prNode) {
+            this.logger.warn(`PR #${prNumber} not found or not accessible in ${repo}`);
+            return { threads: [], totalCount: 0, hasMore: false };
+        }
+        const reviewThreads = prNode.reviewThreads ?? { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] };
+        const threads = reviewThreads.nodes ?? [];
         // Filter and transform threads
         const result = [];
         for (const thread of threads) {
@@ -141,22 +157,29 @@ export class GitHubAPIAgent {
             if (thread.isOutdated || thread.isCollapsed) {
                 continue;
             }
-            const comments = thread.comments.nodes;
-            if (comments.length === 0) {
+            const rootComment = thread.commentsFirst?.nodes?.[0];
+            const lastComment = thread.commentsLast?.nodes?.[0];
+            if (!rootComment) {
                 continue;
             }
+            // Merge first and last comments, removing duplicates by ID
+            const allComments = [];
+            if (rootComment)
+                allComments.push(rootComment);
+            if (lastComment && lastComment.id !== rootComment.id)
+                allComments.push(lastComment);
             result.push({
                 id: thread.id,
                 isResolved: thread.isResolved,
                 path: thread.path,
                 line: thread.line,
                 startLine: thread.startLine,
-                body: comments[0].body, // First comment is the main review comment
+                body: rootComment.body || '',
                 author: {
-                    login: comments[0].author?.login || 'unknown',
+                    login: rootComment.author?.login || 'unknown',
                 },
-                createdAt: comments[0].createdAt,
-                comments: comments.map((c) => ({
+                createdAt: rootComment.createdAt || '',
+                comments: allComments.map((c) => ({
                     id: c.id,
                     body: c.body,
                     author: {
@@ -166,11 +189,16 @@ export class GitHubAPIAgent {
                 })),
             });
         }
-        this.logger.info(`Found ${result.length} ${onlyUnresolved ? 'unresolved ' : ''}review threads`);
+        // Apply simple paging over filtered results
+        const start = (page - 1) * pageSize;
+        const end = start + pageSize;
+        const paged = result.slice(start, end);
+        const hasMore = end < result.length || (reviewThreads.pageInfo?.hasNextPage === true);
+        this.logger.info(`Returning ${paged.length}/${result.length} threads (page ${page}, size ${pageSize})`);
         return {
-            threads: result,
+            threads: paged,
             totalCount: reviewThreads.totalCount,
-            hasMore: reviewThreads.pageInfo.hasNextPage
+            hasMore
         };
     }
     async postComment(repo, prNumber, threadId, body) {
@@ -181,9 +209,9 @@ export class GitHubAPIAgent {
             this.logger.dryRun('post comment', { repo, prNumber, threadId, body });
             return { success: true };
         }
-        // Rate limiting check
-        await this.rateLimiter.waitForLimit();
-        this.rateLimiter.startRequest();
+        // Rate limiting check - atomic acquire to prevent races
+        await this.rateLimiter.acquire();
+        let ok = false;
         this.logger.info(`Posting comment to thread ${threadId}`);
         try {
             const mutation = `
@@ -202,14 +230,13 @@ export class GitHubAPIAgent {
                 threadId,
                 body,
             });
-            this.rateLimiter.endRequest(true);
+            ok = true;
             return {
                 success: true,
                 commentId: response.addPullRequestReviewThreadReply?.comment?.id
             };
         }
         catch (error) {
-            this.rateLimiter.endRequest(false);
             // Check if it's a rate limit error
             const errorMessage = error.message || '';
             const rateLimitMatch = errorMessage.match(/wait (\d+) minutes? and (\d+) seconds?/i);
@@ -217,9 +244,12 @@ export class GitHubAPIAgent {
                 const minutes = parseInt(rateLimitMatch[1] || '0', 10);
                 const seconds = parseInt(rateLimitMatch[2] || '0', 10);
                 this.rateLimiter.handleRateLimitError(minutes, seconds);
-                this.logger.error(`CodeRabbit rate limit: wait ${minutes}m ${seconds}s`);
+                this.logger.error(`GitHub rate limit: wait ${minutes}m ${seconds}s`);
             }
             throw error;
+        }
+        finally {
+            this.rateLimiter.endRequest(ok);
         }
     }
     async resolveThread(repo, prNumber, threadId) {
@@ -271,8 +301,8 @@ export class GitHubAPIAgent {
             this.logger.debug(`Attempt ${attempt + 1}/${maxAttempts}, waiting ${waitInterval}ms`);
             await new Promise(resolve => setTimeout(resolve, waitInterval));
         }
-        const result = hasChecks ? 'timeout' : 'no_checks_found';
-        this.logger.warn(`Check runs ${result}`);
+        const result = hasChecks ? 'timed_out' : null;
+        this.logger.warn(`Check runs ${hasChecks ? 'timed out' : 'not found'}`);
         return result;
     }
     async getCheckRunsUrl(repo, prNumber, commitSha) {

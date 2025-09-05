@@ -13,43 +13,34 @@ export declare const ConfigSchema: z.ZodObject<{
         threadTimeout?: number | undefined;
         batchSize?: number | undefined;
     }>;
+    rateLimit: z.ZodOptional<z.ZodObject<{
+        maxRequestsPerHour: z.ZodDefault<z.ZodNumber>;
+        maxRequestsPerMinute: z.ZodDefault<z.ZodNumber>;
+        maxConcurrent: z.ZodDefault<z.ZodNumber>;
+        backoffMultiplier: z.ZodDefault<z.ZodNumber>;
+        maxBackoffMs: z.ZodDefault<z.ZodNumber>;
+    }, "strip", z.ZodTypeAny, {
+        maxRequestsPerHour: number;
+        maxRequestsPerMinute: number;
+        maxConcurrent: number;
+        backoffMultiplier: number;
+        maxBackoffMs: number;
+    }, {
+        maxRequestsPerHour?: number | undefined;
+        maxRequestsPerMinute?: number | undefined;
+        maxConcurrent?: number | undefined;
+        backoffMultiplier?: number | undefined;
+        maxBackoffMs?: number | undefined;
+    }>>;
     validation: z.ZodObject<{
-        llm: z.ZodOptional<z.ZodObject<{
-            provider: z.ZodEnum<["openai", "anthropic"]>;
-            model: z.ZodString;
-            temperature: z.ZodDefault<z.ZodNumber>;
-            confidenceThreshold: z.ZodDefault<z.ZodNumber>;
-        }, "strip", z.ZodTypeAny, {
-            provider: "openai" | "anthropic";
-            model: string;
-            temperature: number;
-            confidenceThreshold: number;
-        }, {
-            provider: "openai" | "anthropic";
-            model: string;
-            temperature?: number | undefined;
-            confidenceThreshold?: number | undefined;
-        }>>;
         autoAccept: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         autoReject: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         conventions: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         autoAccept: string[];
         autoReject: string[];
-        llm?: {
-            provider: "openai" | "anthropic";
-            model: string;
-            temperature: number;
-            confidenceThreshold: number;
-        } | undefined;
         conventions?: string | undefined;
     }, {
-        llm?: {
-            provider: "openai" | "anthropic";
-            model: string;
-            temperature?: number | undefined;
-            confidenceThreshold?: number | undefined;
-        } | undefined;
         autoAccept?: string[] | undefined;
         autoReject?: string[] | undefined;
         conventions?: string | undefined;
@@ -83,12 +74,6 @@ export declare const ConfigSchema: z.ZodObject<{
     validation: {
         autoAccept: string[];
         autoReject: string[];
-        llm?: {
-            provider: "openai" | "anthropic";
-            model: string;
-            temperature: number;
-            confidenceThreshold: number;
-        } | undefined;
         conventions?: string | undefined;
     };
     parallelism: {
@@ -107,14 +92,15 @@ export declare const ConfigSchema: z.ZodObject<{
     };
     dry_run: boolean;
     max_iterations: number;
+    rateLimit?: {
+        maxRequestsPerHour: number;
+        maxRequestsPerMinute: number;
+        maxConcurrent: number;
+        backoffMultiplier: number;
+        maxBackoffMs: number;
+    } | undefined;
 }, {
     validation: {
-        llm?: {
-            provider: "openai" | "anthropic";
-            model: string;
-            temperature?: number | undefined;
-            confidenceThreshold?: number | undefined;
-        } | undefined;
         autoAccept?: string[] | undefined;
         autoReject?: string[] | undefined;
         conventions?: string | undefined;
@@ -133,6 +119,13 @@ export declare const ConfigSchema: z.ZodObject<{
         owner?: string | undefined;
         repo?: string | undefined;
     };
+    rateLimit?: {
+        maxRequestsPerHour?: number | undefined;
+        maxRequestsPerMinute?: number | undefined;
+        maxConcurrent?: number | undefined;
+        backoffMultiplier?: number | undefined;
+        maxBackoffMs?: number | undefined;
+    } | undefined;
     dry_run?: boolean | undefined;
     max_iterations?: number | undefined;
 }>;
@@ -231,7 +224,7 @@ export declare const ReviewThreadSchema: z.ZodObject<{
 export declare const PullRequestSchema: z.ZodObject<{
     number: z.ZodNumber;
     title: z.ZodString;
-    state: z.ZodEnum<["open", "closed"]>;
+    state: z.ZodEnum<["open", "closed", "merged"]>;
     isDraft: z.ZodBoolean;
     baseRef: z.ZodString;
     headRef: z.ZodString;
@@ -239,7 +232,7 @@ export declare const PullRequestSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     number: number;
     title: string;
-    state: "open" | "closed";
+    state: "open" | "closed" | "merged";
     isDraft: boolean;
     baseRef: string;
     headRef: string;
@@ -247,7 +240,7 @@ export declare const PullRequestSchema: z.ZodObject<{
 }, {
     number: number;
     title: string;
-    state: "open" | "closed";
+    state: "open" | "closed" | "merged";
     isDraft: boolean;
     baseRef: string;
     headRef: string;

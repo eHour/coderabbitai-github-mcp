@@ -87,12 +87,6 @@ export interface Config {
     maxBackoffMs: number;
   };
   validation: {
-    llm?: {
-      provider: 'openai' | 'anthropic';
-      model: string;
-      temperature: number;
-      confidenceThreshold: number;
-    };
     autoAccept: string[];
     autoReject: string[];
     conventions?: string;

@@ -25,7 +25,7 @@ export class CodePatcherAgent {
                 this.messageBus.respond(message, { success: true });
             }
             catch (error) {
-                this.logger.error(`Failed to apply patch`, error);
+                this.logger.error('Failed to apply patch', error);
                 this.messageBus.respond(message, {
                     success: false,
                     error: error instanceof Error ? error.message : String(error),
@@ -71,25 +71,38 @@ export class CodePatcherAgent {
         }
         const fullPath = path.join(this.workDir, actualFilePath);
         const resolvedPath = path.resolve(fullPath);
-        // Prevent path traversal attacks
-        const base = path.resolve(this.workDir);
-        const rel = path.relative(base, resolvedPath);
-        if (rel.startsWith('..') || path.isAbsolute(rel)) {
-            throw new Error(`Path traversal detected: ${actualFilePath}`);
+        // Prevent path traversal attacks (including via symlinks)
+        const baseReal = await fs.realpath(this.workDir);
+        let targetReal;
+        try {
+            targetReal = await fs.realpath(resolvedPath);
+        }
+        catch {
+            throw new Error(`Target file does not exist: ${actualFilePath}`);
+        }
+        const relReal = path.relative(baseReal, targetReal);
+        if (relReal.startsWith('..') || path.isAbsolute(relReal)) {
+            throw new Error(`Path traversal (via symlink) detected: ${actualFilePath}`);
         }
         // Read current file content
-        const currentContent = await fs.readFile(fullPath, 'utf-8');
+        const currentContent = await fs.readFile(targetReal, 'utf-8');
         // Apply the patch
         const patchedContent = this.applyUnifiedDiff(currentContent, patchStr);
         // Write the patched content back
-        await fs.writeFile(fullPath, patchedContent);
+        await fs.writeFile(targetReal, patchedContent);
         this.logger.info(`Applied patch to ${actualFilePath}`);
     }
     extractFilePathFromPatch(patchStr) {
         // Extract file path from unified diff header
-        const match = patchStr.match(/^--- a?\/(.+)$/m) ||
-            patchStr.match(/^\+\+\+ b?\/(.+)$/m);
-        return match ? match[1] : null;
+        const match = patchStr.match(/^---\s+(?:a\/)?(.+)$/m) ||
+            patchStr.match(/^\+\+\+\s+(?:b\/)?(.+)$/m);
+        if (!match)
+            return null;
+        const p = match[1].trim();
+        // Ignore special device paths
+        if (p === '/dev/null' || p === 'dev/null' || p.toUpperCase() === 'NUL')
+            return null;
+        return p;
     }
     applyUnifiedDiff(original, patchStr) {
         const patched = diff.applyPatch(original, patchStr);

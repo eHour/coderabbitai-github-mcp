@@ -45,19 +45,19 @@ export class OrchestratorAgent {
     }
     async getUnresolvedThreads(repo, prNumber, page = 1, pageSize = 10) {
         try {
-            console.error('DEBUG Orchestrator: Start getUnresolvedThreads');
+            this.logger.debug('Start getUnresolvedThreads');
             // Validate and constrain pageSize
             pageSize = Math.min(Math.max(1, pageSize || 10), 50);
             page = Math.max(1, page || 1);
-            console.error('DEBUG Orchestrator: Calling listReviewThreads');
+            this.logger.debug('Calling listReviewThreads');
             const allThreads = await this.githubAgent.listReviewThreads(repo, prNumber, true);
-            console.error('DEBUG Orchestrator: Got threads, filtering for coderabbitai');
+            this.logger.debug('Got threads, filtering for coderabbitai');
             const coderabbitThreads = allThreads.threads.filter(t => t.author.login === 'coderabbitai');
             // Apply pagination to CodeRabbit threads
             const startIndex = (page - 1) * pageSize;
             const endIndex = startIndex + pageSize;
             const paginatedThreads = coderabbitThreads.slice(startIndex, endIndex);
-            console.error('DEBUG Orchestrator: Mapping threads');
+            this.logger.debug('Mapping threads');
             const threads = paginatedThreads.map(thread => ({
                 id: thread.id,
                 path: thread.path,
@@ -67,7 +67,7 @@ export class OrchestratorAgent {
                 // Note: suggestion extraction removed to reduce initial response size
                 // Suggestion will be extracted when thread is actually processed
             }));
-            console.error('DEBUG Orchestrator: Returning result');
+            this.logger.debug('Returning result');
             return {
                 threads,
                 totalCount: coderabbitThreads.length,
@@ -77,9 +77,7 @@ export class OrchestratorAgent {
             };
         }
         catch (error) {
-            console.error('ERROR in Orchestrator.getUnresolvedThreads:');
-            console.error('Message:', error.message);
-            console.error('Stack:', error.stack?.substring(0, 500));
+            this.logger.error('Orchestrator.getUnresolvedThreads failed', error);
             throw error;
         }
     }
@@ -120,8 +118,8 @@ export class OrchestratorAgent {
         try {
             // Pre-flight checks
             const prMeta = await this.githubAgent.getPRMeta(repo, prNumber);
-            if (prMeta.isDraft || prMeta.state === 'closed') {
-                throw new Error(`PR ${prNumber} is ${prMeta.isDraft ? 'draft' : 'closed'}`);
+            if (prMeta.isDraft || prMeta.state === 'closed' || prMeta.state === 'merged') {
+                throw new Error(`PR ${prNumber} is ${prMeta.isDraft ? 'draft' : prMeta.state}`);
             }
             // If external validation mode, just return the threads for Claude to analyze
             if (validationMode === 'external') {
@@ -214,7 +212,17 @@ export class OrchestratorAgent {
                 const analysisResult = analysis.value;
                 switch (analysisResult.result) {
                     case ValidationResult.VALID:
-                        validFixes.push(analysisResult);
+                        if (analysisResult.patch && analysisResult.patch.trim()) {
+                            validFixes.push(analysisResult);
+                        }
+                        else {
+                            needsReviewThreads.push({
+                                ...analysisResult,
+                                result: ValidationResult.NEEDS_REVIEW,
+                                reasoning: `${analysisResult.reasoning || 'Valid'} but no patch provided`,
+                            });
+                            result.needsReview++;
+                        }
                         break;
                     case ValidationResult.INVALID:
                         invalidThreads.push(analysisResult);
@@ -233,18 +241,18 @@ export class OrchestratorAgent {
                 const patchResults = await this.patcherAgent.applyBatch(repo, prNumber, validFixes.map(f => ({
                     threadId: f.threadId,
                     filePath: '', // Will be extracted from patch
-                    patch: f.patch,
+                    patch: f.patch, // safe now since we checked above
                 })));
                 if (patchResults.success) {
                     // Step 3: COMMIT
                     this.logger.info(`\n💾 STEP 3: COMMIT - Creating commit for ${validFixes.length} fixes...`);
                     const commitSha = await this.patcherAgent.commitAndPush(repo, prNumber, `fix: apply ${validFixes.length} CodeRabbit suggestions`);
                     // Step 4: PUSH
-                    this.logger.info(`\n⬆️  STEP 4: PUSH - Pushing changes to remote...`);
+                    this.logger.info('\n⬆️  STEP 4: PUSH - Pushing changes to remote...');
                     this.logger.info(`   Commit SHA: ${commitSha}`);
                     await this.stateManager.markThreadsAsPushed(validFixes.map(f => f.threadId), commitSha);
                     // Wait for CI
-                    this.logger.info(`\n🔄 Waiting for CI checks to complete...`);
+                    this.logger.info('\n🔄 Waiting for CI checks to complete...');
                     const ciResult = await this.monitorAgent.waitForCI(repo, prNumber, commitSha);
                     if (ciResult === 'success') {
                         // Step 5: RESOLVE
@@ -256,7 +264,7 @@ export class OrchestratorAgent {
                         }
                         this.logger.info(`   Successfully resolved all ${validFixes.length} threads!`);
                         // Step 6: NEXT
-                        this.logger.info(`\n➡️  STEP 6: NEXT - Moving to next iteration...`);
+                        this.logger.info('\n➡️  STEP 6: NEXT - Moving to next iteration...');
                     }
                     else {
                         // CI failed - revert and notify
@@ -275,6 +283,10 @@ export class OrchestratorAgent {
                     this.logger.warn(errMsg);
                     result.errors.push(errMsg);
                     // Mark as needs review since patch couldn't be applied
+                    await this.stateManager.batchUpdateThreadStates(validFixes.map(f => ({
+                        threadId: f.threadId,
+                        state: { status: 'needs_review', lastError: errMsg },
+                    })));
                     for (const fix of validFixes) {
                         await this.githubAgent.postComment(repo, prNumber, fix.threadId, `@coderabbitai I could not apply the suggested patch: ${errMsg}. Please provide an updated diff.`);
                     }
@@ -296,7 +308,7 @@ export class OrchestratorAgent {
             for (const needsReview of needsReviewThreads) {
                 if (!dryRun) {
                     const message = needsReview.result === ValidationResult.UNPATCHABLE
-                        ? `@coderabbitai I could not apply this suggestion as the patch failed. The surrounding code may have changed. Please provide an updated suggestion.`
+                        ? '@coderabbitai I could not apply this suggestion as the patch failed. The surrounding code may have changed. Please provide an updated suggestion.'
                         : `@coderabbitai This suggestion requires human review. My analysis confidence is below threshold (${Math.round(needsReview.confidence * 100)}%). Could you clarify the expected behavior?`;
                     await this.githubAgent.postComment(repo, prNumber, needsReview.threadId, message);
                 }

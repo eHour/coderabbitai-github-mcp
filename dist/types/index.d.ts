@@ -22,7 +22,7 @@ export interface ReviewComment {
 export interface PullRequest {
     number: number;
     title: string;
-    state: 'open' | 'closed';
+    state: 'open' | 'closed' | 'merged';
     isDraft: boolean;
     baseRef: string;
     headRef: string;
@@ -57,7 +57,7 @@ export interface AgentMessage {
     target: string;
     payload: any;
     correlationId: string;
-    timestamp: Date;
+    timestamp: string;
 }
 export interface PatchRequest {
     threadId: string;
@@ -79,12 +79,6 @@ export interface Config {
         maxBackoffMs: number;
     };
     validation: {
-        llm?: {
-            provider: 'openai' | 'anthropic';
-            model: string;
-            temperature: number;
-            confidenceThreshold: number;
-        };
         autoAccept: string[];
         autoReject: string[];
         conventions?: string;
@@ -101,5 +95,18 @@ export interface Config {
     dry_run: boolean;
     max_iterations: number;
 }
-export type CheckRunConclusion = 'success' | 'failure' | 'timeout' | 'no_checks_found';
+export type CheckRunConclusion = 'action_required' | 'cancelled' | 'failure' | 'neutral' | 'success' | 'skipped' | 'stale' | 'timed_out' | null;
+export interface WorkflowInstruction {
+    current_step: 'start' | 'validate' | 'apply' | 'challenge' | 'next' | 'complete';
+    instruction: string;
+    next_tool?: string;
+    next_params?: Record<string, any>;
+    validation_criteria?: string[];
+    progress?: string;
+    reminder?: string;
+}
+export interface WorkflowToolResponse<T = any> {
+    data: T;
+    workflow: WorkflowInstruction;
+}
 //# sourceMappingURL=index.d.ts.map

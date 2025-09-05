@@ -19,7 +19,7 @@ export class MessageBus extends EventEmitter {
         const fullMessage = {
             ...message,
             id: uuidv4(),
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
         };
         this.messageLog.push(fullMessage);
         // Prevent memory leak by maintaining circular buffer
@@ -37,11 +37,11 @@ export class MessageBus extends EventEmitter {
         const fullMessage = {
             ...message,
             id: messageId,
-            timestamp: new Date(),
+            correlationId: message.correlationId ?? messageId,
+            timestamp: new Date().toISOString(),
         };
         return new Promise((resolve, reject) => {
             const responseChannel = `${message.source}-response`;
-            let timeout;
             const responseHandler = (response) => {
                 if (response.correlationId !== messageId)
                     return;
@@ -50,7 +50,7 @@ export class MessageBus extends EventEmitter {
                 this.off(responseChannel, responseHandler);
                 resolve(response.payload);
             };
-            timeout = setTimeout(() => {
+            const timeout = setTimeout(() => {
                 this.off(responseChannel, responseHandler);
                 this.pendingResponses.delete(messageId);
                 reject(new Error(`Request timeout: ${message.type} to ${message.target}`));
@@ -62,6 +62,10 @@ export class MessageBus extends EventEmitter {
             if (this.messageLog.length > MAX_MESSAGE_LOG_SIZE) {
                 this.messageLog.shift(); // Remove oldest message
             }
+            this.logger.debug(`Request sent: ${message.source} -> ${message.target}`, {
+                type: message.type,
+                correlationId: fullMessage.correlationId,
+            });
             this.emit(message.target, fullMessage);
         });
     }
@@ -84,8 +88,15 @@ export class MessageBus extends EventEmitter {
             target: `${originalMessage.source}-response`,
             payload: response,
             correlationId: originalMessage.id,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
         };
+        this.messageLog.push(responseMessage);
+        if (this.messageLog.length > MAX_MESSAGE_LOG_SIZE) {
+            this.messageLog.shift();
+        }
+        this.logger.debug(`Response sent: ${responseMessage.source} -> ${responseMessage.target}`, {
+            correlationId: responseMessage.correlationId,
+        });
         this.emit(responseMessage.target, responseMessage);
     }
     getMessageLog(filter) {
@@ -101,7 +112,7 @@ export class MessageBus extends EventEmitter {
                 messages = messages.filter(m => m.type === filter.type);
             }
             if (filter.since) {
-                messages = messages.filter(m => m.timestamp >= filter.since);
+                messages = messages.filter(m => new Date(m.timestamp) >= filter.since);
             }
         }
         return messages;

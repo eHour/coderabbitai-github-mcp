@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import picomatch from 'picomatch';
 import { MessageBus } from '../lib/message-bus.js';
 import { StateManager } from '../lib/state-manager.js';
@@ -12,7 +11,6 @@ import {
 
 export class ThreadAnalyzerAgent {
   private logger: Logger;
-  private openai?: OpenAI;
 
   constructor(
     private workerId: number,
@@ -21,13 +19,6 @@ export class ThreadAnalyzerAgent {
     private config: Config
   ) {
     this.logger = new Logger(`Analyzer-${workerId}`);
-    
-    // Initialize LLM client if configured
-    if (config.validation.llm?.provider === 'openai' && process.env.OPENAI_API_KEY) {
-      this.openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-      });
-    }
 
     this.setupMessageHandlers();
   }
@@ -79,12 +70,7 @@ export class ThreadAnalyzerAgent {
         return heuristicResult;
       }
 
-      // If LLM is available, use it
-      if (this.openai && this.config.validation.llm) {
-        return await this.validateWithLLM(thread, suggestion);
-      }
-
-      // Default to needs review if no validation method available
+      // Default to needs review if no heuristic match
       return {
         threadId: thread.id,
         result: ValidationResult.NEEDS_REVIEW,
@@ -205,77 +191,6 @@ export class ThreadAnalyzerAgent {
     return suggestion.type.includes(pattern) || 
            suggestion.description.includes(pattern) ||
            (suggestion.file?.includes(pattern) ?? false);
-  }
-
-  private async validateWithLLM(
-    thread: ReviewThread,
-    suggestion: ReturnType<typeof this.extractSuggestion>
-  ): Promise<AnalysisResult> {
-    if (!this.openai || !this.config.validation.llm) {
-      throw new Error('LLM not configured');
-    }
-
-    const prompt = `
-You are a code review validator. Analyze this CodeRabbit suggestion and determine if it's valid.
-
-File: ${suggestion.file}
-Line: ${suggestion.line}
-Suggestion: ${suggestion.description}
-${suggestion.code ? `Suggested code:\n${suggestion.code}` : ''}
-
-Consider:
-1. Is this a real issue or false positive?
-2. Would fixing this improve the code?
-3. Could the fix introduce bugs?
-4. Is the suggestion clear and actionable?
-
-Respond with JSON:
-{
-  "valid": boolean,
-  "confidence": number (0-1),
-  "reasoning": "string",
-  "patch": "unified diff string if valid, null otherwise"
-}`;
-
-    try {
-      const response = await this.openai.chat.completions.create({
-        model: this.config.validation.llm.model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: this.config.validation.llm.temperature,
-        response_format: { type: 'json_object' },
-      });
-
-      const result = JSON.parse(response.choices[0].message.content || '{}') as {
-        valid: boolean;
-        confidence: number;
-        reasoning: string;
-        patch?: string;
-      };
-      
-      const validationResult: ValidationResult = 
-        result.confidence < this.config.validation.llm.confidenceThreshold
-          ? ValidationResult.NEEDS_REVIEW
-          : result.valid === true
-            ? ValidationResult.VALID
-            : ValidationResult.INVALID;
-
-      return {
-        threadId: thread.id,
-        result: validationResult,
-        confidence: result.confidence,
-        reasoning: result.reasoning,
-        patch: result.patch,
-      };
-    } catch (error) {
-      this.logger.error('LLM validation failed', error);
-      return {
-        threadId: thread.id,
-        result: ValidationResult.NEEDS_REVIEW,
-        confidence: 0,
-        reasoning: 'LLM validation failed',
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
   }
 
   private generatePatchFromSuggestion(

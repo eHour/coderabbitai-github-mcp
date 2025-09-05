@@ -41,7 +41,6 @@
     "diff": "^5.1.0",
     "dotenv": "^16.3.1",
     "eventemitter3": "^5.0.1",
-    "openai": "^4.28.0",
     "p-queue": "^7.4.1",
     "picomatch": "^4.0.3",
     "simple-git": "^3.22.0",

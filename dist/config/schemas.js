@@ -5,15 +5,14 @@ export const ConfigSchema = z.object({
         threadTimeout: z.number().min(5000).default(30000),
         batchSize: z.number().min(1).max(50).default(10),
     }),
+    rateLimit: z.object({
+        maxRequestsPerHour: z.number().min(1).default(50),
+        maxRequestsPerMinute: z.number().min(1).default(10),
+        maxConcurrent: z.number().min(1).default(3),
+        backoffMultiplier: z.number().min(1).default(2),
+        maxBackoffMs: z.number().min(1000).default(300000),
+    }).optional(),
     validation: z.object({
-        llm: z
-            .object({
-            provider: z.enum(['openai', 'anthropic']),
-            model: z.string(),
-            temperature: z.number().min(0).max(1).default(0.2),
-            confidenceThreshold: z.number().min(0).max(1).default(0.7),
-        })
-            .optional(),
         autoAccept: z.array(z.string()).default([]),
         autoReject: z.array(z.string()).default([]),
         conventions: z.string().optional(),
@@ -31,8 +30,12 @@ export const ConfigSchema = z.object({
     max_iterations: z.number().min(1).max(10).default(3),
 });
 export const GitHubToolInputSchema = z.object({
-    repo: z.string().describe('Repository in format owner/name'),
-    prNumber: z.number().describe('Pull request number'),
+    repo: z
+        .string()
+        .trim()
+        .regex(/^[^/]+\/[^/]+$/, 'Repository must be in owner/name format')
+        .describe('Repository in format owner/name'),
+    prNumber: z.number().int().positive().describe('Pull request number'),
 });
 export const ReviewThreadSchema = z.object({
     id: z.string(),
@@ -57,7 +60,7 @@ export const ReviewThreadSchema = z.object({
 export const PullRequestSchema = z.object({
     number: z.number(),
     title: z.string(),
-    state: z.enum(['open', 'closed']),
+    state: z.enum(['open', 'closed', 'merged']),
     isDraft: z.boolean(),
     baseRef: z.string(),
     headRef: z.string(),
@@ -87,6 +90,6 @@ export const CheckRunSchema = z.object({
         'timed_out',
     ])
         .nullable(),
-    html_url: z.string(),
+    html_url: z.string().url(),
 });
 //# sourceMappingURL=schemas.js.map

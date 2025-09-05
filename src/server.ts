@@ -10,8 +10,10 @@ import { OrchestratorAgent } from './agents/orchestrator.js';
 import { MessageBus } from './lib/message-bus.js';
 import { StateManager } from './lib/state-manager.js';
 import { Logger } from './lib/logger.js';
-import { Config } from './types/index.js';
+import { workflowStateManager } from './lib/workflow-state.js';
+import { Config, WorkflowToolResponse } from './types/index.js';
 import { loadConfig, validateGitHubToken } from './config/loader.js';
+import { GitHubAPIAgent } from './agents/github-api.js';
 
 const logger = new Logger('MCP-Server');
 
@@ -21,6 +23,7 @@ class CodeRabbitMCPServer {
   private messageBus: MessageBus;
   private stateManager: StateManager;
   private config: Config;
+  private githubAgent: GitHubAPIAgent;
 
   private safeStringify(obj: any): string {
     const seen = new WeakSet();
@@ -55,6 +58,10 @@ class CodeRabbitMCPServer {
     this.orchestrator = new OrchestratorAgent(
       this.messageBus,
       this.stateManager,
+      this.config
+    );
+    this.githubAgent = new GitHubAPIAgent(
+      this.messageBus,
       this.config
     );
 
@@ -240,8 +247,78 @@ class CodeRabbitMCPServer {
                 type: 'string', 
                 enum: ['internal', 'external'],
                 default: 'internal',
-                description: 'internal: use heuristics/LLM, external: return threads for Claude validation'
+                description: 'internal: use heuristics only, external: return threads for Claude validation'
               },
+            },
+            required: ['repo', 'prNumber'],
+          },
+        },
+        // Workflow-aware tools for guided resolution
+        {
+          name: 'coderabbit_workflow_start',
+          description: 'Start the CodeRabbit resolution workflow. Returns first thread with validation instructions.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              repo: { type: 'string', description: 'Repository in format owner/name' },
+              prNumber: { type: 'number', description: 'Pull request number' },
+            },
+            required: ['repo', 'prNumber'],
+          },
+        },
+        {
+          name: 'coderabbit_workflow_validate',
+          description: 'Record your validation decision for the current thread',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              repo: { type: 'string' },
+              prNumber: { type: 'number' },
+              threadId: { type: 'string' },
+              isValid: { type: 'boolean', description: 'Whether the suggestion is valid and should be applied' },
+              reason: { type: 'string', description: 'Explanation for the decision' },
+            },
+            required: ['repo', 'prNumber', 'threadId', 'isValid'],
+          },
+        },
+        {
+          name: 'coderabbit_workflow_apply',
+          description: 'Apply the validated fix, commit, push, and resolve the thread',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              repo: { type: 'string' },
+              prNumber: { type: 'number' },
+              threadId: { type: 'string' },
+              filePath: { type: 'string' },
+              diffString: { type: 'string', description: 'Unified diff to apply' },
+              commitMessage: { type: 'string' },
+            },
+            required: ['repo', 'prNumber', 'threadId', 'filePath', 'diffString'],
+          },
+        },
+        {
+          name: 'coderabbit_workflow_challenge',
+          description: 'Challenge an invalid suggestion with explanation',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              repo: { type: 'string' },
+              prNumber: { type: 'number' },
+              threadId: { type: 'string' },
+              reason: { type: 'string', description: 'Explanation why the suggestion is invalid' },
+            },
+            required: ['repo', 'prNumber', 'threadId', 'reason'],
+          },
+        },
+        {
+          name: 'coderabbit_workflow_status',
+          description: 'Get current workflow progress and next steps',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              repo: { type: 'string' },
+              prNumber: { type: 'number' },
             },
             required: ['repo', 'prNumber'],
           },
@@ -332,6 +409,91 @@ class CodeRabbitMCPServer {
                 },
               ],
             };
+
+          // Workflow-aware tool handlers
+          case 'coderabbit_workflow_start': {
+            const response = await this.handleWorkflowStart(
+              args?.repo as string,
+              args?.prNumber as number
+            );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.safeStringify(response),
+                },
+              ],
+            };
+          }
+
+          case 'coderabbit_workflow_validate': {
+            const response = await this.handleWorkflowValidate(
+              args?.repo as string,
+              args?.prNumber as number,
+              args?.threadId as string,
+              args?.isValid as boolean,
+              args?.reason as string
+            );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.safeStringify(response),
+                },
+              ],
+            };
+          }
+
+          case 'coderabbit_workflow_apply': {
+            const response = await this.handleWorkflowApply(
+              args?.repo as string,
+              args?.prNumber as number,
+              args?.threadId as string,
+              args?.filePath as string,
+              args?.diffString as string,
+              args?.commitMessage as string
+            );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.safeStringify(response),
+                },
+              ],
+            };
+          }
+
+          case 'coderabbit_workflow_challenge': {
+            const response = await this.handleWorkflowChallenge(
+              args?.repo as string,
+              args?.prNumber as number,
+              args?.threadId as string,
+              args?.reason as string
+            );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.safeStringify(response),
+                },
+              ],
+            };
+          }
+
+          case 'coderabbit_workflow_status': {
+            const response = await this.handleWorkflowStatus(
+              args?.repo as string,
+              args?.prNumber as number
+            );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.safeStringify(response),
+                },
+              ],
+            };
+          }
             
           default:
             // Delegate to individual tools
@@ -358,6 +520,349 @@ class CodeRabbitMCPServer {
         };
       }
     });
+  }
+
+  // Workflow tool handlers
+  private async handleWorkflowStart(
+    repo: string,
+    prNumber: number
+  ): Promise<WorkflowToolResponse> {
+    logger.info(`Starting workflow for ${repo}#${prNumber}`);
+    
+    // Fetch all CodeRabbit threads
+    const threadsData = await this.githubAgent.listReviewThreads(repo, prNumber, true);
+    const coderabbitThreads = threadsData.threads.filter(
+      t => t.author.login === 'coderabbitai' && !t.isResolved
+    );
+    
+    if (coderabbitThreads.length === 0) {
+      return {
+        data: {
+          message: 'No unresolved CodeRabbit threads found',
+          total: 0
+        },
+        workflow: {
+          current_step: 'complete',
+          instruction: 'All CodeRabbit threads are already resolved or there are none.',
+          progress: '0 of 0 threads'
+        }
+      };
+    }
+    
+    // Initialize workflow state
+    workflowStateManager.create(repo, prNumber, coderabbitThreads);
+    const firstThread = coderabbitThreads[0];
+    
+    return {
+      data: {
+        thread: {
+          id: firstThread.id,
+          path: firstThread.path,
+          line: firstThread.line,
+          body: firstThread.body,
+          createdAt: firstThread.createdAt
+        },
+        total_threads: coderabbitThreads.length,
+        thread_number: 1
+      },
+      workflow: {
+        current_step: 'validate',
+        instruction: `Analyze this CodeRabbit suggestion and determine if it's valid and beneficial. The suggestion is for ${firstThread.path}${firstThread.line ? ` at line ${firstThread.line}` : ''}.`,
+        validation_criteria: [
+          'Is the suggestion technically correct?',
+          'Will it improve code quality or fix a real issue?',
+          'Could applying this change introduce bugs or break functionality?',
+          'Is the suggestion clear and actionable?'
+        ],
+        next_tool: 'coderabbit_workflow_validate',
+        next_params: {
+          repo,
+          prNumber,
+          threadId: firstThread.id
+        },
+        progress: `1 of ${coderabbitThreads.length} threads`,
+        reminder: 'Process threads ONE BY ONE. Always validate before applying any changes.'
+      }
+    };
+  }
+
+  private async handleWorkflowValidate(
+    repo: string,
+    prNumber: number,
+    threadId: string,
+    isValid: boolean,
+    reason?: string
+  ): Promise<WorkflowToolResponse> {
+    logger.info(`Validation decision for thread ${threadId}: ${isValid ? 'VALID' : 'INVALID'}`);
+    
+    // Record the validation decision
+    workflowStateManager.recordDecision(repo, prNumber, threadId, isValid, reason);
+    
+    const state = workflowStateManager.get(repo, prNumber);
+    if (!state) {
+      throw new Error('Workflow state not found. Please start the workflow first.');
+    }
+    
+    const currentThread = state.threads.find(t => t.id === threadId);
+    if (!currentThread) {
+      throw new Error('Thread not found in workflow state');
+    }
+    
+    if (isValid) {
+      return {
+        data: {
+          threadId,
+          decision: 'valid',
+          reason: reason || 'Suggestion is valid and will be applied'
+        },
+        workflow: {
+          current_step: 'apply',
+          instruction: `The suggestion has been validated as correct. Now apply the fix by providing the unified diff and commit message.`,
+          next_tool: 'coderabbit_workflow_apply',
+          next_params: {
+            repo,
+            prNumber,
+            threadId,
+            filePath: currentThread.path
+          },
+          progress: workflowStateManager.getProgress(repo, prNumber).percentComplete + '%',
+          reminder: 'Provide a clear commit message and ensure the diff is correct.'
+        }
+      };
+    } else {
+      return {
+        data: {
+          threadId,
+          decision: 'invalid',
+          reason: reason || 'Suggestion is not valid'
+        },
+        workflow: {
+          current_step: 'challenge',
+          instruction: `Challenge this invalid suggestion by explaining why it's not applicable.`,
+          next_tool: 'coderabbit_workflow_challenge',
+          next_params: {
+            repo,
+            prNumber,
+            threadId,
+            reason: reason || 'This suggestion is not applicable'
+          },
+          progress: workflowStateManager.getProgress(repo, prNumber).percentComplete + '%'
+        }
+      };
+    }
+  }
+
+  private async handleWorkflowApply(
+    repo: string,
+    prNumber: number,
+    threadId: string,
+    filePath: string,
+    diffString: string,
+    commitMessage?: string
+  ): Promise<WorkflowToolResponse> {
+    logger.info(`Applying fix for thread ${threadId}`);
+    
+    // Apply the fix using orchestrator's apply method
+    const applyResult = await this.orchestrator.applyValidatedFix(
+      repo,
+      prNumber,
+      threadId,
+      filePath,
+      diffString,
+      commitMessage || `fix: Apply CodeRabbit suggestion for ${filePath}`
+    );
+    
+    if (!applyResult.success) {
+      throw new Error(`Failed to apply fix: ${applyResult.message}`);
+    }
+    
+    // Record application
+    workflowStateManager.recordApplication(repo, prNumber, threadId, 'commit-sha');
+    
+    // Advance to next thread
+    const hasMore = workflowStateManager.advance(repo, prNumber);
+    const progress = workflowStateManager.getProgress(repo, prNumber);
+    
+    if (!hasMore) {
+      return {
+        data: {
+          threadId,
+          status: 'applied',
+          message: applyResult.message
+        },
+        workflow: {
+          current_step: 'complete',
+          instruction: `All ${progress.total} CodeRabbit threads have been processed successfully!`,
+          progress: `${progress.total} of ${progress.total} threads completed`
+        }
+      };
+    }
+    
+    // Get next thread
+    const nextThread = workflowStateManager.getCurrentThread(repo, prNumber);
+    if (!nextThread) {
+      throw new Error('Next thread not found');
+    }
+    
+    return {
+      data: {
+        threadId,
+        status: 'applied',
+        message: applyResult.message,
+        next_thread: {
+          id: nextThread.id,
+          path: nextThread.path,
+          line: nextThread.line,
+          body: nextThread.body
+        }
+      },
+      workflow: {
+        current_step: 'validate',
+        instruction: `Fix applied successfully. Now validate the next CodeRabbit suggestion for ${nextThread.path}.`,
+        next_tool: 'coderabbit_workflow_validate',
+        next_params: {
+          repo,
+          prNumber,
+          threadId: nextThread.id
+        },
+        validation_criteria: [
+          'Is the suggestion technically correct?',
+          'Will it improve code quality?',
+          'Could it introduce bugs?'
+        ],
+        progress: `${progress.processed + 1} of ${progress.total} threads`,
+        reminder: 'Continue processing threads one by one.'
+      }
+    };
+  }
+
+  private async handleWorkflowChallenge(
+    repo: string,
+    prNumber: number,
+    threadId: string,
+    reason: string
+  ): Promise<WorkflowToolResponse> {
+    logger.info(`Challenging thread ${threadId}`);
+    
+    // Post challenge comment
+    await this.githubAgent.postComment(
+      repo,
+      prNumber,
+      threadId,
+      `@coderabbitai ${reason}`
+    );
+    
+    // Advance to next thread
+    const hasMore = workflowStateManager.advance(repo, prNumber);
+    const progress = workflowStateManager.getProgress(repo, prNumber);
+    
+    if (!hasMore) {
+      return {
+        data: {
+          threadId,
+          status: 'challenged',
+          reason
+        },
+        workflow: {
+          current_step: 'complete',
+          instruction: `All ${progress.total} CodeRabbit threads have been processed!`,
+          progress: `${progress.total} of ${progress.total} threads completed`
+        }
+      };
+    }
+    
+    // Get next thread
+    const nextThread = workflowStateManager.getCurrentThread(repo, prNumber);
+    if (!nextThread) {
+      throw new Error('Next thread not found');
+    }
+    
+    return {
+      data: {
+        threadId,
+        status: 'challenged',
+        reason,
+        next_thread: {
+          id: nextThread.id,
+          path: nextThread.path,
+          line: nextThread.line,
+          body: nextThread.body
+        }
+      },
+      workflow: {
+        current_step: 'validate',
+        instruction: `Challenge posted. Now validate the next CodeRabbit suggestion for ${nextThread.path}.`,
+        next_tool: 'coderabbit_workflow_validate',
+        next_params: {
+          repo,
+          prNumber,
+          threadId: nextThread.id
+        },
+        validation_criteria: [
+          'Is the suggestion technically correct?',
+          'Will it improve code quality?',
+          'Could it introduce bugs?'
+        ],
+        progress: `${progress.processed + 1} of ${progress.total} threads`,
+        reminder: 'Continue processing threads one by one.'
+      }
+    };
+  }
+
+  private async handleWorkflowStatus(
+    repo: string,
+    prNumber: number
+  ): Promise<WorkflowToolResponse> {
+    const state = workflowStateManager.get(repo, prNumber);
+    const progress = workflowStateManager.getProgress(repo, prNumber);
+    
+    if (!state) {
+      return {
+        data: {
+          status: 'not_started',
+          message: 'Workflow has not been started for this PR'
+        },
+        workflow: {
+          current_step: 'start',
+          instruction: 'Start the workflow using coderabbit_workflow_start',
+          next_tool: 'coderabbit_workflow_start',
+          next_params: { repo, prNumber }
+        }
+      };
+    }
+    
+    const currentThread = workflowStateManager.getCurrentThread(repo, prNumber);
+    
+    return {
+      data: {
+        status: 'in_progress',
+        progress,
+        current_thread: currentThread ? {
+          id: currentThread.id,
+          path: currentThread.path,
+          line: currentThread.line
+        } : null,
+        decisions_made: Array.from(state.decisions.entries()).map(([id, decision]) => ({
+          threadId: id,
+          isValid: decision.isValid,
+          applied: decision.fixApplied
+        }))
+      },
+      workflow: {
+        current_step: currentThread ? 'validate' : 'complete',
+        instruction: currentThread 
+          ? `Continue validating thread ${currentThread.id}`
+          : 'All threads have been processed',
+        next_tool: currentThread ? 'coderabbit_workflow_validate' : undefined,
+        next_params: currentThread ? {
+          repo,
+          prNumber,
+          threadId: currentThread.id
+        } : undefined,
+        progress: `${progress.processed} of ${progress.total} threads (${progress.percentComplete}%)`,
+        reminder: 'Process threads one by one, always validate before applying.'
+      }
+    };
   }
 
   async start() {

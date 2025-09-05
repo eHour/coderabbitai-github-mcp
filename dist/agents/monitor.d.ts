@@ -9,6 +9,7 @@ export declare class MonitorAgent {
     private githubAgent;
     private pollingIntervals;
     private lastSeenCommentId;
+    private activePollsInProgress;
     constructor(messageBus: MessageBus, stateManager: StateManager, config: Config);
     private setupMessageHandlers;
     waitForCI(repo: string, prNumber: number, commitSha: string): Promise<CheckRunConclusion>;

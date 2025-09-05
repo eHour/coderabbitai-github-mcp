@@ -12,7 +12,7 @@ program
 program
     .command('start', { isDefault: true })
     .description('Start the MCP server')
-    .option('--stdio', 'Use stdio transport (default)', true)
+    .option('--stdio', 'Use stdio transport')
     .option('--port <number>', 'Use HTTP transport on specified port')
     .option('--verbose', 'Enable verbose logging', false)
     .action(async (options) => {
@@ -24,17 +24,18 @@ program
         // Load and validate configuration
         const config = loadConfig();
         validateGitHubToken(config);
-        // Start the MCP server directly in this process for stdio
-        if (options.stdio) {
+        // Transport selection - port takes precedence
+        if (options.port) {
+            logger.info(`Starting HTTP server on port ${options.port}`);
+            // TODO: Implement HTTP transport
+            throw new Error('HTTP transport not yet implemented');
+        }
+        else {
+            // Default to stdio transport
             logger.info('Using stdio transport');
             // Import and start the server directly
             await import('./server.js');
             // The server will handle stdio communication
-        }
-        else if (options.port) {
-            logger.info(`Starting HTTP server on port ${options.port}`);
-            // TODO: Implement HTTP transport
-            throw new Error('HTTP transport not yet implemented');
         }
     }
     catch (error) {
@@ -71,10 +72,14 @@ program
         if (!Number.isInteger(options.pr) || options.pr <= 0) {
             throw new Error('Invalid --pr. Must be a positive integer');
         }
+        if (!Number.isInteger(options.maxIterations) || options.maxIterations <= 0) {
+            throw new Error('Invalid --max-iterations. Must be a positive integer');
+        }
         const config = loadConfig();
         validateGitHubToken(config);
         if (options.dryRun) {
             process.env.DRY_RUN = 'true';
+            Logger.setDryRun(true);
         }
         // For testing, we can directly invoke the orchestrator
         const { MessageBus } = await import('./lib/message-bus.js');

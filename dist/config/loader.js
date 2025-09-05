@@ -73,26 +73,6 @@ export function loadConfig() {
     if (process.env.GITHUB_REPO) {
         config.github.repo = process.env.GITHUB_REPO;
     }
-    if (process.env.OPENAI_API_KEY) {
-        if (!config.validation.llm) {
-            config.validation.llm = {
-                provider: 'openai',
-                model: 'gpt-4-turbo',
-                temperature: 0.2,
-                confidenceThreshold: 0.7,
-            };
-        }
-    }
-    if (process.env.ANTHROPIC_API_KEY) {
-        if (!config.validation.llm) {
-            config.validation.llm = {
-                provider: 'anthropic',
-                model: 'claude-3-opus-20240229',
-                temperature: 0.2,
-                confidenceThreshold: 0.7,
-            };
-        }
-    }
     if (process.env.DRY_RUN === 'true') {
         config.dry_run = true;
     }
@@ -107,7 +87,6 @@ export function loadConfig() {
         const validated = ConfigSchema.parse(config);
         logger.debug('Configuration validated', {
             parallelism: validated.parallelism,
-            hasLLM: !!validated.validation.llm,
             dryRun: validated.dry_run,
         });
         return validated;

@@ -14,14 +14,6 @@ export const ConfigSchema = z.object({
     maxBackoffMs: z.number().min(1000).default(300000),
   }).optional(),
   validation: z.object({
-    llm: z
-      .object({
-        provider: z.enum(['openai', 'anthropic']),
-        model: z.string(),
-        temperature: z.number().min(0).max(1).default(0.2),
-        confidenceThreshold: z.number().min(0).max(1).default(0.7),
-      })
-      .optional(),
     autoAccept: z.array(z.string()).default([]),
     autoReject: z.array(z.string()).default([]),
     conventions: z.string().optional(),

@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import picomatch from 'picomatch';
 import { Logger } from '../lib/logger.js';
 import { ValidationResult } from '../types/index.js';
 export class ThreadAnalyzerAgent {
@@ -6,18 +6,11 @@ export class ThreadAnalyzerAgent {
     messageBus;
     config;
     logger;
-    openai;
     constructor(workerId, messageBus, _stateManager, config) {
         this.workerId = workerId;
         this.messageBus = messageBus;
         this.config = config;
         this.logger = new Logger(`Analyzer-${workerId}`);
-        // Initialize LLM client if configured
-        if (config.validation.llm?.provider === 'openai' && process.env.OPENAI_API_KEY) {
-            this.openai = new OpenAI({
-                apiKey: process.env.OPENAI_API_KEY,
-            });
-        }
         this.setupMessageHandlers();
     }
     setupMessageHandlers() {
@@ -34,7 +27,7 @@ export class ThreadAnalyzerAgent {
         const suggestionLine = lines.find(line => line.trim() &&
             !line.startsWith('#') &&
             !line.includes('```') &&
-            !line.match(/^[⚠️🛠️🐛🔒⚡📚]/)) || '';
+            !line.match(/^[⚠️🛠️🐛🔒⚡📚]/u)) || '';
         const preview = suggestionLine.replace(/[*_`]/g, '').trim().substring(0, 100);
         const location = thread.path ? `${thread.path}:${thread.line || '?'}` : 'no file';
         this.logger.info(`\n${'='.repeat(60)}`);
@@ -47,16 +40,12 @@ export class ThreadAnalyzerAgent {
             // First, try heuristics
             const heuristicResult = this.applyHeuristics(suggestion, thread);
             if (heuristicResult) {
-                this.logger.info(`✅ Heuristic Result: ${heuristicResult.result.toUpperCase()}`);
+                this.logger.info(`✅ Heuristic Result: ${String(heuristicResult.result).toUpperCase()}`);
                 this.logger.info(`   Reason: ${heuristicResult.reasoning}`);
                 this.logger.info(`   Confidence: ${(heuristicResult.confidence * 100).toFixed(0)}%`);
                 return heuristicResult;
             }
-            // If LLM is available, use it
-            if (this.openai && this.config.validation.llm) {
-                return await this.validateWithLLM(thread, suggestion);
-            }
-            // Default to needs review if no validation method available
+            // Default to needs review if no heuristic match
             return {
                 threadId: thread.id,
                 result: ValidationResult.NEEDS_REVIEW,
@@ -143,77 +132,16 @@ export class ThreadAnalyzerAgent {
         return null;
     }
     matchesPattern(suggestion, pattern) {
-        // Simple glob pattern matching with ReDoS protection
+        // Use safe glob matching to prevent ReDoS
         if (pattern.includes('*')) {
-            // Escape all special regex characters first
-            const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Then convert escaped asterisks to wildcards
-            const safePattern = escapedPattern.replace(/\\\*/g, '.*');
-            const regex = new RegExp(safePattern);
-            return regex.test(suggestion.type) ||
-                regex.test(suggestion.description) ||
-                (suggestion.file ? regex.test(suggestion.file) : false);
+            const isMatch = (s) => !!s && picomatch.isMatch(s, pattern, { nocase: true });
+            return isMatch(suggestion.type) ||
+                isMatch(suggestion.description) ||
+                isMatch(suggestion.file);
         }
         return suggestion.type.includes(pattern) ||
             suggestion.description.includes(pattern) ||
             (suggestion.file?.includes(pattern) ?? false);
-    }
-    async validateWithLLM(thread, suggestion) {
-        if (!this.openai || !this.config.validation.llm) {
-            throw new Error('LLM not configured');
-        }
-        const prompt = `
-You are a code review validator. Analyze this CodeRabbit suggestion and determine if it's valid.
-
-File: ${suggestion.file}
-Line: ${suggestion.line}
-Suggestion: ${suggestion.description}
-${suggestion.code ? `Suggested code:\n${suggestion.code}` : ''}
-
-Consider:
-1. Is this a real issue or false positive?
-2. Would fixing this improve the code?
-3. Could the fix introduce bugs?
-4. Is the suggestion clear and actionable?
-
-Respond with JSON:
-{
-  "valid": boolean,
-  "confidence": number (0-1),
-  "reasoning": "string",
-  "patch": "unified diff string if valid, null otherwise"
-}`;
-        try {
-            const response = await this.openai.chat.completions.create({
-                model: this.config.validation.llm.model,
-                messages: [{ role: 'user', content: prompt }],
-                temperature: this.config.validation.llm.temperature,
-                response_format: { type: 'json_object' },
-            });
-            const result = JSON.parse(response.choices[0].message.content || '{}');
-            const validationResult = result.confidence < this.config.validation.llm.confidenceThreshold
-                ? ValidationResult.NEEDS_REVIEW
-                : result.valid === true
-                    ? ValidationResult.VALID
-                    : ValidationResult.INVALID;
-            return {
-                threadId: thread.id,
-                result: validationResult,
-                confidence: result.confidence,
-                reasoning: result.reasoning,
-                patch: result.patch,
-            };
-        }
-        catch (error) {
-            this.logger.error('LLM validation failed', error);
-            return {
-                threadId: thread.id,
-                result: ValidationResult.NEEDS_REVIEW,
-                confidence: 0,
-                reasoning: 'LLM validation failed',
-                error: error instanceof Error ? error.message : String(error),
-            };
-        }
     }
     generatePatchFromSuggestion(suggestion) {
         if (!suggestion.code) {

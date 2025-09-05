@@ -7,7 +7,9 @@ export declare class MessageBus extends EventEmitter {
     constructor();
     private setupErrorHandling;
     send(message: Omit<AgentMessage, 'id' | 'timestamp'>): void;
-    request<T = any>(message: Omit<AgentMessage, 'id' | 'timestamp'>, timeoutMs?: number): Promise<T>;
+    request<T = any>(message: Omit<AgentMessage, 'id' | 'timestamp' | 'correlationId'> & {
+        correlationId?: string;
+    }, timeoutMs?: number): Promise<T>;
     subscribe(agentId: string, handler: (message: AgentMessage) => void | Promise<void>): void;
     respond(originalMessage: AgentMessage, response: any): void;
     getMessageLog(filter?: {

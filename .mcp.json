@@ -2,7 +2,7 @@
   "mcpServers": {
     "coderabbit": {
       "command": "node",
-      "args": ["./dist/server.js"]
+      "args": ["--enable-source-maps", "./dist/server.js"]
     }
   }
 }
