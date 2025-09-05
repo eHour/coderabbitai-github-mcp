@@ -32,6 +32,7 @@ const logger = winston.createLogger({
         winston.format.errors({ stack: true }),
         customFormat
       ),
+      stderrLevels: ['info', 'warn', 'error', 'debug'],
     }),
   ],
 });
