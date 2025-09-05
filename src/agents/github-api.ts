@@ -134,7 +134,17 @@ export class GitHubAPIAgent {
                 path
                 line
                 startLine
-                comments(first: 10) {
+                commentsFirst: comments(first: 1) {
+                  nodes {
+                    id
+                    body
+                    author {
+                      login
+                    }
+                    createdAt
+                  }
+                }
+                commentsLast: comments(last: 1) {
                   nodes {
                     id
                     body
@@ -179,10 +189,16 @@ export class GitHubAPIAgent {
         continue;
       }
       
-      const comments = thread.comments.nodes;
-      if (comments.length === 0) {
+      const rootComment = thread.commentsFirst?.nodes?.[0];
+      const lastComment = thread.commentsLast?.nodes?.[0];
+      if (!rootComment) {
         continue;
       }
+      
+      // Merge first and last comments, removing duplicates by ID
+      const allComments = [];
+      if (rootComment) allComments.push(rootComment);
+      if (lastComment && lastComment.id !== rootComment.id) allComments.push(lastComment);
       
       result.push({
         id: thread.id,
@@ -190,12 +206,12 @@ export class GitHubAPIAgent {
         path: thread.path,
         line: thread.line,
         startLine: thread.startLine,
-        body: comments[0].body, // First comment is the main review comment
+        body: rootComment.body || '',
         author: {
-          login: comments[0].author?.login || 'unknown',
+          login: rootComment.author?.login || 'unknown',
         },
-        createdAt: comments[0].createdAt,
-        comments: comments.map((c: any) => ({
+        createdAt: rootComment.createdAt || '',
+        comments: allComments.map((c: any) => ({
           id: c.id,
           body: c.body,
           author: {
