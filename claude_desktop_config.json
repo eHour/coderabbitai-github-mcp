@@ -2,7 +2,7 @@
   "mcpServers": {
     "coderabbit": {
       "command": "node",
-      "args": ["/home/thies/projects/ehour/ehourp/tools/coderabbitai-github-mcp/dist/server.js"],
+      "args": ["./dist/server.js"],
       "env": {
         "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
       }
