@@ -70,6 +70,7 @@ export class GitHubAPIAgent {
             title
             state
             isDraft
+            merged
             baseRefName
             headRefName
             headRefOid
@@ -92,7 +93,7 @@ export class GitHubAPIAgent {
     return {
       number: pr.number,
       title: pr.title,
-      state: pr.state.toLowerCase() as 'open' | 'closed',
+      state: pr.merged ? 'merged' : (pr.state.toLowerCase() as 'open' | 'closed' | 'merged'),
       isDraft: pr.isDraft,
       baseRef: pr.baseRefName,
       headRef: pr.headRefName,

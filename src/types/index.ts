@@ -24,7 +24,7 @@ export interface ReviewComment {
 export interface PullRequest {
   number: number;
   title: string;
-  state: 'open' | 'closed';
+  state: 'open' | 'closed' | 'merged';
   isDraft: boolean;
   baseRef: string;
   headRef: string;

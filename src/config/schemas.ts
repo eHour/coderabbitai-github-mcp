@@ -69,7 +69,7 @@ export const ReviewThreadSchema = z.object({
 export const PullRequestSchema = z.object({
   number: z.number(),
   title: z.string(),
-  state: z.enum(['open', 'closed']),
+  state: z.enum(['open', 'closed', 'merged']),
   isDraft: z.boolean(),
   baseRef: z.string(),
   headRef: z.string(),

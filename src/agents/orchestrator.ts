@@ -175,8 +175,8 @@ export class OrchestratorAgent {
     try {
       // Pre-flight checks
       const prMeta = await this.githubAgent.getPRMeta(repo, prNumber);
-      if (prMeta.isDraft || prMeta.state === 'closed') {
-        throw new Error(`PR ${prNumber} is ${prMeta.isDraft ? 'draft' : 'closed'}`);
+      if (prMeta.isDraft || prMeta.state === 'closed' || prMeta.state === 'merged') {
+        throw new Error(`PR ${prNumber} is ${prMeta.isDraft ? 'draft' : prMeta.state}`);
       }
 
       // If external validation mode, just return the threads for Claude to analyze
