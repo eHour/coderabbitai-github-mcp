@@ -6,6 +6,13 @@ export const ConfigSchema = z.object({
     threadTimeout: z.number().min(5000).default(30000),
     batchSize: z.number().min(1).max(50).default(10),
   }),
+  rateLimit: z.object({
+    maxRequestsPerHour: z.number().min(1).default(50),
+    maxRequestsPerMinute: z.number().min(1).default(10),
+    maxConcurrent: z.number().min(1).default(3),
+    backoffMultiplier: z.number().min(1).default(2),
+    maxBackoffMs: z.number().min(1000).default(300000),
+  }).optional(),
   validation: z.object({
     llm: z
       .object({
