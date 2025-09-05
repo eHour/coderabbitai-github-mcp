@@ -18,6 +18,8 @@
     "no-unused-vars": "off",
     "indent": ["error", 2],
     "quotes": ["error", "single"],
+    "semi": ["error", "always"],
+    "max-len": ["error", { "code": 120, "ignoreUrls": true, "ignoreComments": true }],
     "@typescript-eslint/no-explicit-any": "warn",
     "@typescript-eslint/no-unused-vars": ["error", { 
       "argsIgnorePattern": "^_",
