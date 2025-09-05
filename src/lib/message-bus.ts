@@ -48,14 +48,14 @@ export class MessageBus extends EventEmitter {
   }
 
   async request<T = any>(
-    message: Omit<AgentMessage, 'id' | 'timestamp'>,
+    message: Omit<AgentMessage, 'id' | 'timestamp' | 'correlationId'> & { correlationId?: string },
     timeoutMs = 30000
   ): Promise<T> {
     const messageId = uuidv4();
     const fullMessage: AgentMessage = {
       ...message,
       id: messageId,
-      correlationId: (message as any).correlationId ?? messageId,
+      correlationId: message.correlationId ?? messageId,
       timestamp: new Date(),
     };
 
