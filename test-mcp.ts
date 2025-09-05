@@ -19,31 +19,31 @@ const rl = readline.createInterface({
 
 let requestId = 1;
 
-// Handle server output (MCP stdio framing)
-let stdoutBuffer = '';
-server.stdout.on('data', (chunk) => {
-  stdoutBuffer += chunk.toString('utf8');
+// Handle server output (MCP stdio framing) — Buffer-safe
+let stdoutBuffer: Buffer = Buffer.alloc(0);
+server.stdout.on('data', (chunk: Buffer) => {
+  stdoutBuffer = Buffer.concat([stdoutBuffer, Buffer.from(chunk)]);
   for (;;) {
-    const headerEnd = stdoutBuffer.indexOf('\r\n\r\n');
+    const headerEnd = stdoutBuffer.indexOf(Buffer.from('\r\n\r\n'));
     if (headerEnd === -1) break;
-    const headers = stdoutBuffer.slice(0, headerEnd);
-    const m = headers.match(/Content-Length:\s*(\d+)/i);
+    const headerBuf = stdoutBuffer.slice(0, headerEnd);
+    const headers = headerBuf.toString('utf8');
+    const m = /Content-Length:\s*(\d+)/i.exec(headers);
     if (!m) {
-      // Not a framed message; dump and continue
-      console.log('📝 Server log:', stdoutBuffer.slice(0, headerEnd));
+      console.log('📝 Server log:', headers);
       stdoutBuffer = stdoutBuffer.slice(headerEnd + 4);
       continue;
     }
     const len = parseInt(m[1], 10);
     const bodyStart = headerEnd + 4;
-    if (stdoutBuffer.length - bodyStart < len) break; // wait for more bytes
-    const body = stdoutBuffer.slice(bodyStart, bodyStart + len);
+    if (stdoutBuffer.length - bodyStart < len) break; // wait for full body
+    const bodyBuf = stdoutBuffer.slice(bodyStart, bodyStart + len);
     stdoutBuffer = stdoutBuffer.slice(bodyStart + len);
     try {
-      const response = JSON.parse(body);
+      const response = JSON.parse(bodyBuf.toString('utf8'));
       console.log('\n📥 Response:', JSON.stringify(response, null, 2));
     } catch {
-      console.log('📝 Server log:', body);
+      console.log('📝 Server log:', bodyBuf.toString('utf8'));
     }
   }
 });
