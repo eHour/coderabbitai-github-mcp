@@ -235,9 +235,8 @@ export class GitHubAPIAgent {
       return { success: true };
     }
 
-    // Rate limiting check
-    await this.rateLimiter.waitForLimit();
-    this.rateLimiter.startRequest();
+    // Rate limiting check - atomic acquire to prevent races
+    await this.rateLimiter.acquire();
     let ok = false;
     this.logger.info(`Posting comment to thread ${threadId}`);
     

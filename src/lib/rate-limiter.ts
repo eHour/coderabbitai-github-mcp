@@ -14,6 +14,7 @@ export class RateLimiter {
   private concurrentRequests = 0;
   private backoffUntil: number = 0;
   private consecutiveErrors = 0;
+  private acquireGuard = false;
 
   constructor(private config: RateLimitConfig) {
     const problems: string[] = [];
@@ -86,12 +87,45 @@ export class RateLimiter {
    * Wait until rate limit allows request
    */
   async waitForLimit(): Promise<void> {
+    // Keep for backward compatibility (no reservation)
     let check = await this.checkLimit();
     
     while (!check.allowed) {
       this.logger.info(`Rate limit: ${check.reason}`);
       await new Promise(resolve => setTimeout(resolve, check.waitMs));
       check = await this.checkLimit();
+    }
+  }
+
+  /**
+   * Atomically wait and reserve capacity to avoid races
+   */
+  async acquire(): Promise<void> {
+    for (;;) {
+      // Wait until likely allowed
+      await this.waitForLimit();
+      
+      // Lightweight reservation guard: ensure only one reserver at a time
+      if (this.acquireGuard) {
+        await new Promise(r => setTimeout(r, 10));
+        continue;
+      }
+      
+      this.acquireGuard = true;
+      try {
+        const check = await this.checkLimit();
+        if (check.allowed) {
+          const now = Date.now();
+          const oneHourAgo = now - 3600000;
+          this.requestTimestamps = this.requestTimestamps.filter(ts => ts >= oneHourAgo);
+          this.requestTimestamps.push(now);
+          this.concurrentRequests++;
+          return;
+        }
+      } finally {
+        this.acquireGuard = false;
+      }
+      await new Promise(r => setTimeout(r, 25));
     }
   }
 
