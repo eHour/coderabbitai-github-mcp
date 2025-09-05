@@ -66,14 +66,14 @@ export class OrchestratorAgent {
     pageSize: number;
   }> {
     try {
-      console.error('DEBUG Orchestrator: Start getUnresolvedThreads');
+      this.logger.debug('Start getUnresolvedThreads');
       // Validate and constrain pageSize
       pageSize = Math.min(Math.max(1, pageSize || 10), 50);
       page = Math.max(1, page || 1);
       
-      console.error('DEBUG Orchestrator: Calling listReviewThreads');
+      this.logger.debug('Calling listReviewThreads');
       const allThreads = await this.githubAgent.listReviewThreads(repo, prNumber, true);
-      console.error('DEBUG Orchestrator: Got threads, filtering for coderabbitai');
+      this.logger.debug('Got threads, filtering for coderabbitai');
       const coderabbitThreads = allThreads.threads.filter(t => t.author.login === 'coderabbitai');
       
       // Apply pagination to CodeRabbit threads
@@ -81,7 +81,7 @@ export class OrchestratorAgent {
       const endIndex = startIndex + pageSize;
       const paginatedThreads = coderabbitThreads.slice(startIndex, endIndex);
       
-      console.error('DEBUG Orchestrator: Mapping threads');
+      this.logger.debug('Mapping threads');
       const threads = paginatedThreads.map(thread => ({
         id: thread.id,
         path: thread.path,
@@ -92,7 +92,7 @@ export class OrchestratorAgent {
         // Suggestion will be extracted when thread is actually processed
       }));
       
-      console.error('DEBUG Orchestrator: Returning result');
+      this.logger.debug('Returning result');
       return {
         threads,
         totalCount: coderabbitThreads.length,
@@ -101,9 +101,7 @@ export class OrchestratorAgent {
         pageSize
       };
     } catch (error: any) {
-      console.error('ERROR in Orchestrator.getUnresolvedThreads:');
-      console.error('Message:', error.message);
-      console.error('Stack:', error.stack?.substring(0, 500));
+      this.logger.error('Orchestrator.getUnresolvedThreads failed', error);
       throw error;
     }
   }
