@@ -43,6 +43,7 @@
     "eventemitter3": "^5.0.1",
     "openai": "^4.28.0",
     "p-queue": "^7.4.1",
+    "picomatch": "^4.0.3",
     "simple-git": "^3.22.0",
     "uuid": "^11.1.0",
     "winston": "^3.11.0",
@@ -51,6 +52,7 @@
   "devDependencies": {
     "@types/diff": "^5.0.8",
     "@types/node": "^20.11.0",
+    "@types/picomatch": "^4.0.2",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
     "eslint": "^8.56.0",

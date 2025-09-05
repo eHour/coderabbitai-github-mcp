@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import picomatch from 'picomatch';
 import { MessageBus } from '../lib/message-bus.js';
 import { StateManager } from '../lib/state-manager.js';
 import { Logger } from '../lib/logger.js';
@@ -192,16 +193,13 @@ export class ThreadAnalyzerAgent {
     suggestion: ReturnType<typeof this.extractSuggestion>,
     pattern: string
   ): boolean {
-    // Simple glob pattern matching with ReDoS protection
+    // Use safe glob matching to prevent ReDoS
     if (pattern.includes('*')) {
-      // Escape all special regex characters first
-      const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // Then convert escaped asterisks to wildcards
-      const safePattern = escapedPattern.replace(/\\\*/g, '.*');
-      const regex = new RegExp(safePattern);
-      return regex.test(suggestion.type) || 
-             regex.test(suggestion.description) ||
-             (suggestion.file ? regex.test(suggestion.file) : false);
+      const isMatch = (s: string | undefined) =>
+        !!s && picomatch.isMatch(s, pattern, { nocase: true });
+      return isMatch(suggestion.type) ||
+             isMatch(suggestion.description) ||
+             isMatch(suggestion.file);
     }
     
     return suggestion.type.includes(pattern) || 
