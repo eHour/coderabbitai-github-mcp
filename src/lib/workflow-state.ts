@@ -93,7 +93,7 @@ export class WorkflowStateManager {
     const state = this.get(repo, prNumber);
     if (!state) return false;
     
-    state.currentIndex++;
+    state.currentIndex = Math.min(state.currentIndex + 1, state.threads.length);
     state.processed++;
     state.lastUpdated = new Date();
     
@@ -115,7 +115,9 @@ export class WorkflowStateManager {
       total: state.threads.length,
       processed: state.processed,
       remaining: state.threads.length - state.processed,
-      percentComplete: Math.round((state.processed / state.threads.length) * 100)
+      percentComplete: state.threads.length > 0 
+        ? Math.round((state.processed / state.threads.length) * 100)
+        : 0
     };
   }
 
