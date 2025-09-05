@@ -19,19 +19,32 @@ const rl = readline.createInterface({
 
 let requestId = 1;
 
-// Handle server output
-server.stdout.on('data', (data) => {
-  try {
-    const lines = data.toString().split('\n').filter(line => line.trim());
-    for (const line of lines) {
-      if (line.startsWith('{')) {
-        const response = JSON.parse(line);
-        console.log('\n📥 Response:', JSON.stringify(response, null, 2));
-      }
+// Handle server output (MCP stdio framing)
+let stdoutBuffer = '';
+server.stdout.on('data', (chunk) => {
+  stdoutBuffer += chunk.toString('utf8');
+  for (;;) {
+    const headerEnd = stdoutBuffer.indexOf('\r\n\r\n');
+    if (headerEnd === -1) break;
+    const headers = stdoutBuffer.slice(0, headerEnd);
+    const m = headers.match(/Content-Length:\s*(\d+)/i);
+    if (!m) {
+      // Not a framed message; dump and continue
+      console.log('📝 Server log:', stdoutBuffer.slice(0, headerEnd));
+      stdoutBuffer = stdoutBuffer.slice(headerEnd + 4);
+      continue;
     }
-  } catch (e) {
-    // Not JSON, probably log output
-    console.log('📝 Server log:', data.toString());
+    const len = parseInt(m[1], 10);
+    const bodyStart = headerEnd + 4;
+    if (stdoutBuffer.length - bodyStart < len) break; // wait for more bytes
+    const body = stdoutBuffer.slice(bodyStart, bodyStart + len);
+    stdoutBuffer = stdoutBuffer.slice(bodyStart + len);
+    try {
+      const response = JSON.parse(body);
+      console.log('\n📥 Response:', JSON.stringify(response, null, 2));
+    } catch {
+      console.log('📝 Server log:', body);
+    }
   }
 });
 
@@ -49,7 +62,9 @@ function sendRequest(method: string, params: any = {}) {
   };
   
   console.log('\n📤 Request:', JSON.stringify(request, null, 2));
-  server.stdin.write(JSON.stringify(request) + '\n');
+  const payload = JSON.stringify(request);
+  const message = `Content-Length: ${Buffer.byteLength(payload, 'utf8')}\r\n\r\n${payload}`;
+  server.stdin.write(message);
 }
 
 // Interactive menu
