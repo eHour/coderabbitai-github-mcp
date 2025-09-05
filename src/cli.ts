@@ -17,7 +17,7 @@ program
 program
   .command('start', { isDefault: true })
   .description('Start the MCP server')
-  .option('--stdio', 'Use stdio transport (default)', true)
+  .option('--stdio', 'Use stdio transport')
   .option('--port <number>', 'Use HTTP transport on specified port')
   .option('--verbose', 'Enable verbose logging', false)
   .action(async (options) => {
@@ -32,16 +32,17 @@ program
       const config = loadConfig();
       validateGitHubToken(config);
 
-      // Start the MCP server directly in this process for stdio
-      if (options.stdio) {
+      // Transport selection - port takes precedence
+      if (options.port) {
+        logger.info(`Starting HTTP server on port ${options.port}`);
+        // TODO: Implement HTTP transport
+        throw new Error('HTTP transport not yet implemented');
+      } else {
+        // Default to stdio transport
         logger.info('Using stdio transport');
         // Import and start the server directly
         await import('./server.js');
         // The server will handle stdio communication
-      } else if (options.port) {
-        logger.info(`Starting HTTP server on port ${options.port}`);
-        // TODO: Implement HTTP transport
-        throw new Error('HTTP transport not yet implemented');
       }
     } catch (error) {
       logger.error('Failed to start server', error);
