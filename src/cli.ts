@@ -18,7 +18,7 @@ program
   .command('start', { isDefault: true })
   .description('Start the MCP server')
   .option('--stdio', 'Use stdio transport')
-  .option('--port <number>', 'Use HTTP transport on specified port')
+  .option('--port <number>', 'Use HTTP transport on specified port', (v) => parseInt(v, 10))
   .option('--verbose', 'Enable verbose logging', false)
   .action(async (options) => {
     try {
@@ -34,7 +34,11 @@ program
 
       // Transport selection - port takes precedence
       if (options.port) {
-        logger.info(`Starting HTTP server on port ${options.port}`);
+        const port = Number(options.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          throw new Error(`Invalid --port value: "${options.port}" (must be 1–65535)`);
+        }
+        logger.info(`Starting HTTP server on port ${port}`);
         // TODO: Implement HTTP transport
         throw new Error('HTTP transport not yet implemented');
       } else {
@@ -57,6 +61,7 @@ program
   .requiredOption('--repo <repo>', 'Repository in format owner/name')
   .requiredOption('--pr <number>', 'Pull request number', parseInt)
   .option('--max-iterations <number>', 'Maximum iterations', parseInt, 3)
+  .option('--max-workers <number>', 'Maximum parallel analyzers', parseInt, 5)
   .option('--dry-run', 'Print intended actions without executing', false)
   .option('--verbose', 'Enable verbose logging', false)
   .action(async (options) => {

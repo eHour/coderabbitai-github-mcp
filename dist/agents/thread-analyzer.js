@@ -24,10 +24,11 @@ export class ThreadAnalyzerAgent {
     async analyzeThread(thread, _repo, _prNumber) {
         // Extract comment preview for better visibility
         const lines = thread.body.split('\n');
-        const suggestionLine = lines.find(line => line.trim() &&
-            !line.startsWith('#') &&
-            !line.includes('```') &&
-            !line.match(/^[⚠️🛠️🐛🔒⚡📚]/u)) || '';
+        const noiseRe = /^(?:#|```|⚠️|🛠️|🐛|🔒|⚡|📚)/u;
+        const suggestionLine = lines.find((line) => {
+            const t = line.trim();
+            return t && !noiseRe.test(t);
+        }) || '';
         const preview = suggestionLine.replace(/[*_`]/g, '').trim().substring(0, 100);
         const location = thread.path ? `${thread.path}:${thread.line || '?'}` : 'no file';
         this.logger.info(`\n${'='.repeat(60)}`);

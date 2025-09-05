@@ -61,7 +61,7 @@ export interface AgentMessage {
 }
 export interface PatchRequest {
     threadId: string;
-    filePath: string;
+    filePath?: string;
     patch: string;
     lineNumber?: number;
 }
@@ -97,7 +97,7 @@ export interface Config {
 }
 export type CheckRunConclusion = 'action_required' | 'cancelled' | 'failure' | 'neutral' | 'success' | 'skipped' | 'stale' | 'timed_out' | null;
 export interface WorkflowInstruction {
-    current_step: 'start' | 'validate' | 'apply' | 'challenge' | 'next' | 'complete';
+    current_step: 'start' | 'validate' | 'apply' | 'challenge' | 'next' | 'complete' | 'resolve';
     instruction: string;
     next_tool?: string;
     next_params?: Record<string, any>;

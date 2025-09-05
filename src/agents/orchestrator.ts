@@ -438,7 +438,8 @@ export class OrchestratorAgent {
             repo,
             prNumber,
             invalid.threadId,
-            `@coderabbitai Thank you for the suggestion. We believe this is not valid because: ${invalid.reasoning}. Could you point to a failing case if you see one?`
+            '@coderabbitai Thank you for the suggestion. We believe this is not valid because: ' +
+            `${invalid.reasoning}. Could you point to a failing case if you see one?`
           );
         } else {
           this.logger.dryRun('post invalid comment', { threadId: invalid.threadId });
@@ -448,8 +449,11 @@ export class OrchestratorAgent {
       for (const needsReview of needsReviewThreads) {
         if (!dryRun) {
           const message = needsReview.result === ValidationResult.UNPATCHABLE
-            ? '@coderabbitai I could not apply this suggestion as the patch failed. The surrounding code may have changed. Please provide an updated suggestion.'
-            : `@coderabbitai This suggestion requires human review. My analysis confidence is below threshold (${Math.round(needsReview.confidence * 100)}%). Could you clarify the expected behavior?`;
+            ? '@coderabbitai I could not apply this suggestion as the patch failed. ' +
+              'The surrounding code may have changed. Please provide an updated suggestion.'
+            : '@coderabbitai This suggestion requires human review. ' +
+              `My analysis confidence is below threshold (${Math.round(needsReview.confidence * 100)}%). ` +
+              'Could you clarify the expected behavior?';
           
           await this.githubAgent.postComment(repo, prNumber, needsReview.threadId, message);
         } else {

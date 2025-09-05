@@ -89,12 +89,12 @@ export class GitHubAPIAgent {
         // Constrain pageSize to reasonable limits
         pageSize = Math.min(Math.max(1, pageSize), 50);
         // We'll fetch all threads with pagination support
-        // For now, fetching up to 100 threads total (can be extended with cursor pagination if needed)
+        // GitHub has a bug where resolution status is wrong in first page, so we need ALL threads
         const query = `
-      query($owner: String!, $name: String!, $number: Int!, $first: Int!) {
+      query($owner: String!, $name: String!, $number: Int!, $first: Int!, $after: String) {
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
-            reviewThreads(first: $first) {
+            reviewThreads(first: $first, after: $after) {
               totalCount
               pageInfo {
                 hasNextPage
@@ -134,20 +134,38 @@ export class GitHubAPIAgent {
         }
       }
     `;
-        // For simplicity, fetch up to 100 threads initially
-        const response = await this.graphqlClient(query, {
-            owner,
-            name,
-            number: prNumber,
-            first: 100
-        });
-        const prNode = response?.repository?.pullRequest;
-        if (!prNode) {
-            this.logger.warn(`PR #${prNumber} not found or not accessible in ${repo}`);
-            return { threads: [], totalCount: 0, hasMore: false };
+        // Fetch ALL threads with pagination to work around GitHub bug where
+        // resolution status is incorrect in the first page
+        let allThreads = [];
+        let cursor = null;
+        let hasNextPage = true;
+        let totalCount = 0;
+        while (hasNextPage) {
+            const response = await this.graphqlClient(query, {
+                owner,
+                name,
+                number: prNumber,
+                first: 100,
+                after: cursor
+            });
+            const prNode = response?.repository?.pullRequest;
+            if (!prNode) {
+                this.logger.warn(`PR #${prNumber} not found or not accessible in ${repo}`);
+                return { threads: [], totalCount: 0, hasMore: false };
+            }
+            const reviewThreads = prNode.reviewThreads ?? { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] };
+            const pageThreads = reviewThreads.nodes ?? [];
+            allThreads = allThreads.concat(pageThreads);
+            totalCount = reviewThreads.totalCount;
+            hasNextPage = reviewThreads.pageInfo?.hasNextPage ?? false;
+            cursor = reviewThreads.pageInfo?.endCursor ?? null;
+            // Limit total fetching to prevent infinite loops
+            if (allThreads.length >= 200) {
+                this.logger.warn('Limiting thread fetch to 200 threads');
+                break;
+            }
         }
-        const reviewThreads = prNode.reviewThreads ?? { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] };
-        const threads = reviewThreads.nodes ?? [];
+        const threads = allThreads;
         // Diagnostic logging to debug thread detection
         this.logger.info(`Raw threads from GitHub API for PR #${prNumber}: ${threads.length} total`);
         threads.forEach((thread, index) => {
@@ -162,8 +180,9 @@ export class GitHubAPIAgent {
             if (onlyUnresolved && thread.isResolved) {
                 continue;
             }
-            // Skip collapsed threads but include outdated ones (they might still need resolution)
-            if (thread.isCollapsed) {
+            // Skip collapsed threads only if they're also resolved
+            // GitHub sometimes marks unresolved threads as collapsed incorrectly
+            if (thread.isCollapsed && thread.isResolved) {
                 continue;
             }
             const rootComment = thread.commentsFirst?.nodes?.[0];
@@ -202,11 +221,11 @@ export class GitHubAPIAgent {
         const start = (page - 1) * pageSize;
         const end = start + pageSize;
         const paged = result.slice(start, end);
-        const hasMore = end < result.length || (reviewThreads.pageInfo?.hasNextPage === true);
+        const hasMore = end < result.length;
         this.logger.info(`Returning ${paged.length}/${result.length} threads (page ${page}, size ${pageSize})`);
         return {
             threads: paged,
-            totalCount: reviewThreads.totalCount,
+            totalCount: totalCount,
             hasMore
         };
     }

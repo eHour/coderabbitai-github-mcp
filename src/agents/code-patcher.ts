@@ -87,40 +87,55 @@ export class CodePatcherAgent {
     const fullPath = path.join(this.workDir, actualFilePath);
     const resolvedPath = path.resolve(fullPath);
     
-    // Prevent path traversal attacks (including via symlinks)
+    // Prevent path traversal (incl. via symlinks) and support new files
     const baseReal = await fs.realpath(this.workDir);
-    let targetReal: string;
-    try {
-      targetReal = await fs.realpath(resolvedPath);
-    } catch {
-      throw new Error(`Target file does not exist: ${actualFilePath}`);
-    }
-    const relReal = path.relative(baseReal, targetReal);
+    const targetDir = path.dirname(resolvedPath);
+    const targetDirReal = await fs.realpath(targetDir).catch(() => targetDir); // may not exist yet
+    const relReal = path.relative(baseReal, targetDirReal);
     if (relReal.startsWith('..') || path.isAbsolute(relReal)) {
       throw new Error(`Path traversal (via symlink) detected: ${actualFilePath}`);
     }
-    
-    // Read current file content
-    const currentContent = await fs.readFile(targetReal, 'utf-8');
+    // Canonical file path within verified directory
+    const targetPath = path.join(targetDirReal, path.basename(resolvedPath));
+
+    // Read current file content (treat ENOENT as new file)
+    let currentContent = '';
+    try {
+      currentContent = await fs.readFile(targetPath, 'utf-8');
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') throw err;
+    }
     
     // Apply the patch
     const patchedContent = this.applyUnifiedDiff(currentContent, patchStr);
     
+    // Ensure directory exists and refuse writing to symlinks
+    await fs.mkdir(targetDirReal, { recursive: true });
+    try {
+      const st = await fs.lstat(targetPath);
+      if (st.isSymbolicLink()) {
+        throw new Error(`Refusing to write to symlink: ${actualFilePath}`);
+      }
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') throw err; // ok if file doesn't exist yet
+    }
     // Write the patched content back
-    await fs.writeFile(targetReal, patchedContent);
+    await fs.writeFile(targetPath, patchedContent);
     
     this.logger.info(`Applied patch to ${actualFilePath}`);
   }
 
   private extractFilePathFromPatch(patchStr: string): string | null {
-    // Extract file path from unified diff header
-    const match = patchStr.match(/^---\s+(?:a\/)?(.+)$/m) ||
-                  patchStr.match(/^\+\+\+\s+(?:b\/)?(.+)$/m);
-    if (!match) return null;
-    const p = match[1].trim();
-    // Ignore special device paths
-    if (p === '/dev/null' || p === 'dev/null' || p.toUpperCase() === 'NUL') return null;
-    return p;
+    // Extract file path from unified diff headers; ignore device paths and pick first valid
+    const m1 = patchStr.match(/^---\s+(?:a\/)?(.+)$/m);
+    const m2 = patchStr.match(/^\+\+\+\s+(?:b\/)?(.+)$/m);
+    const candidates = [m1?.[1], m2?.[1]].filter(Boolean).map(s => (s as string).trim());
+    for (const p of candidates) {
+      // Ignore special device paths
+      if (p === '/dev/null' || p === 'dev/null' || p.toUpperCase() === 'NUL') continue;
+      return p;
+    }
+    return null;
   }
 
   private applyUnifiedDiff(original: string, patchStr: string): string {
