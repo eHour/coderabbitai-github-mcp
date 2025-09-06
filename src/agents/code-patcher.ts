@@ -196,9 +196,11 @@ export class CodePatcherAgent {
 
   private extractFilePathFromPatch(patchStr: string): string | null {
     // Extract file path from unified diff headers; ignore device paths and pick first valid
-    const m1 = patchStr.match(/^---\s+(?:a\/)?(.+)$/m);
-    const m2 = patchStr.match(/^\+\+\+\s+(?:b\/)?(.+)$/m);
-    const candidates = [m1?.[1], m2?.[1]].filter(Boolean).map(s => (s as string).trim());
+    const m1 = patchStr.match(/^---\s+(?:a\/)?([^\s]+)/m);
+    const m2 = patchStr.match(/^\+\+\+\s+(?:b\/)?([^\s]+)/m);
+    const candidates = [m1?.[1], m2?.[1]]
+      .filter(Boolean)
+      .map(s => (s as string).trim().replace(/^"(.*)"$/, '$1'));
     for (const p of candidates) {
       // Ignore special device paths
       if (p === '/dev/null' || p === 'dev/null' || p.toUpperCase() === 'NUL') continue;
