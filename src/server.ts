@@ -11,7 +11,7 @@ import { MessageBus } from './lib/message-bus.js';
 import { StateManager } from './lib/state-manager.js';
 import { Logger } from './lib/logger.js';
 import { workflowStateManager } from './lib/workflow-state.js';
-import { Config, WorkflowToolResponse, ReviewThread } from './types/index.js';
+import type { Config, WorkflowToolResponse, ReviewThread } from './types/index.js';
 import { loadConfig, validateGitHubToken } from './config/loader.js';
 import { GitHubAPIAgent } from './agents/github-api.js';
 
