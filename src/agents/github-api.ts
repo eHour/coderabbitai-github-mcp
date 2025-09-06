@@ -168,6 +168,7 @@ export class GitHubAPIAgent {
     let cursor: string | null = null;
     let hasNextPage = true;
     let totalCount = 0;
+    let truncated = false;
     
     while (hasNextPage) {
       const response: any = await this.graphqlClient<any>(query, {
@@ -195,6 +196,7 @@ export class GitHubAPIAgent {
       // Limit total fetching to prevent infinite loops
       if (allThreads.length >= 200) {
         this.logger.warn('Limiting thread fetch to 200 threads');
+        truncated = true;
         break;
       }
     }
@@ -264,7 +266,7 @@ export class GitHubAPIAgent {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
     const paged = result.slice(start, end);
-    const hasMore = end < result.length;
+    const hasMore = truncated || end < result.length;
     this.logger.info(`Returning ${paged.length}/${result.length} threads (page ${page}, size ${pageSize})`);
     
     return {
