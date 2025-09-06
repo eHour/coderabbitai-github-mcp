@@ -93,7 +93,7 @@ coderabbit_workflow_validate(
   reason: "Correctly identifies missing null check"
 )
 
-// Apply the fix
+// Apply the fix (this will apply, commit, push, and resolve in one call)
 coderabbit_workflow_apply(
   repo: "owner/name",
   prNumber: 123,
@@ -102,6 +102,11 @@ coderabbit_workflow_apply(
   diffString: "@@ -10,3 +10,3 @@...",
   commitMessage: "fix: add null check as suggested"
 )
+// The tool automatically:
+// 1. Applies the patch to the file
+// 2. Commits with the provided message
+// 3. Pushes to the remote branch
+// 4. Resolves the GitHub review thread
 
 // Or challenge if invalid
 coderabbit_workflow_challenge(
@@ -254,9 +259,13 @@ Create a `coderabbit-mcp.json` file in your project root:
 2. **Validate**: Review the suggestion and decide if it's valid
 3. **Record Decision**: `coderabbit_workflow_validate` - Record your validation
 4. **Apply or Challenge**:
-   - Valid: `coderabbit_workflow_apply` - Apply fix, commit, push, and resolve
+   - Valid: `coderabbit_workflow_apply` - Complete resolution:
+     - Applies the fix to the file
+     - Commits changes with message
+     - Pushes to remote branch
+     - Resolves the review thread
    - Invalid: `coderabbit_workflow_challenge` - Post explanation to PR
-5. **Continue**: `coderabbit_workflow_status` - Get next thread or completion status
+5. **Continue**: Workflow automatically advances to next thread or completes
 
 ### Manual Tools
 - `get_coderabbit_threads` - Fetch CodeRabbit threads for review
@@ -269,9 +278,9 @@ Create a `coderabbit-mcp.json` file in your project root:
 ### Workflow Tools (Recommended)
 - `coderabbit_workflow_start` - Start processing CodeRabbit threads
 - `coderabbit_workflow_validate` - Record validation decision
-- `coderabbit_workflow_apply` - Apply fix and resolve thread
-- `coderabbit_workflow_challenge` - Challenge invalid suggestion
-- `coderabbit_workflow_status` - Get current workflow status
+- `coderabbit_workflow_apply` - Apply fix, commit, push, and resolve thread (all-in-one)
+- `coderabbit_workflow_challenge` - Challenge invalid suggestion with explanation
+- `coderabbit_workflow_status` - Get current workflow status and next thread
 
 ### Individual Tools
 - `get_coderabbit_threads` - Fetch unresolved CodeRabbit threads
