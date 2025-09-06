@@ -113,7 +113,7 @@ export class GitHubAPIAgent {
     const { owner, name } = this.parseRepo(repo);
     
     // Constrain pageSize to reasonable limits
-    pageSize = Math.min(Math.max(1, pageSize), 50);
+    pageSize = Math.min(Math.max(1, pageSize), 100);
     
     // We'll fetch all threads with pagination support
     // GitHub has a bug where resolution status is wrong in first page, so we need ALL threads
