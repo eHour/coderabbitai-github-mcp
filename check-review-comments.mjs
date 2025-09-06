@@ -10,11 +10,15 @@ async function checkReviewComments() {
   console.log('Fetching PR review comments (inline code comments)...\n');
   
   // Get review comments on the PR (these are the inline code comments)
-  const { data: reviewComments } = await octokit.pulls.listReviewComments({
-    owner: 'eHour',
-    repo: 'coderabbitai-github-mcp',
-    pull_number: 1,
-  });
+  const reviewComments = await octokit.paginate(
+    octokit.pulls.listReviewComments,
+    {
+      owner: 'eHour',
+      repo: 'coderabbitai-github-mcp',
+      pull_number: 1,
+      per_page: 100,
+    }
+  );
   
   console.log(`Found ${reviewComments.length} review comments total\n`);
   
