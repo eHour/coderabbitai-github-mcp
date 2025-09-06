@@ -39,16 +39,22 @@ npx mcp-coderabbit run --repo owner/name --pr 123
 
 You need a GitHub token with appropriate permissions:
 
-#### Fine-grained PAT
-- Contents: Read and Write
-- Pull requests: Read and Write
-- Metadata: Read
+#### Fine-grained PAT (Recommended)
+- **Contents**: Read and Write
+- **Pull requests**: Read and Write  
+- **Actions**: Read (required for GraphQL API and CI/CD status)
+- **Metadata**: Read (automatically included)
 
 #### Classic PAT
 - Scope: `repo` (full control)
 
 #### GitHub App
-- Repository permissions: Contents (Read/Write), Pull requests (Read/Write), Metadata (Read)
+- Repository permissions:
+  - **Contents**: Read/Write
+  - **Pull requests**: Read/Write
+  - **Actions**: Read
+  - **Checks**: Read (optional, for detailed CI status)
+  - **Metadata**: Read
 
 Set your token as an environment variable:
 
@@ -106,6 +112,45 @@ npx mcp-coderabbit server
 ```
 
 This starts the MCP server that can be used by MCP clients.
+
+#### Global Installation in Claude Code
+
+To install this MCP server globally in Claude Code so it's available in all your projects:
+
+1. **Build and install globally from source:**
+   ```bash
+   # Clone the repository
+   git clone https://github.com/your-org/mcp-coderabbit.git
+   cd mcp-coderabbit
+   
+   # Install dependencies and build
+   npm install
+   npm run build
+   
+   # Create global symlink
+   npm link
+   ```
+
+2. **Add to Claude Code configuration:**
+   ```bash
+   # Add the MCP server with environment variable
+   claude mcp add-json coderabbit '{
+     "command": "mcp-coderabbit",
+     "args": ["server"],
+     "env": {
+       "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
+     }
+   }' -s user
+   ```
+
+3. **Verify installation:**
+   ```bash
+   # Check that the server is configured and connected
+   claude mcp list
+   # Should show: coderabbit: mcp-coderabbit server - ✓ Connected
+   ```
+
+The server is now available globally in all your Claude Code projects. Replace `YOUR_GITHUB_TOKEN_HERE` with your actual GitHub Personal Access Token.
 
 #### Claude Desktop Configuration
 
