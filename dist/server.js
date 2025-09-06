@@ -119,7 +119,7 @@ class CodeRabbitMCPServer {
                 },
                 {
                     name: 'code_apply_unified_diff',
-                    description: 'Apply a unified diff patch to a file',
+                    description: 'Apply a unified diff patch to a file (does NOT commit or push - use workflow tools for complete flow)',
                     inputSchema: {
                         type: 'object',
                         properties: {
@@ -188,7 +188,7 @@ class CodeRabbitMCPServer {
                 },
                 {
                     name: 'apply_validated_fix',
-                    description: 'Apply a fix that has been validated externally (by Claude)',
+                    description: 'Apply a validated fix (complete flow: patch file, commit, push to remote, and resolve thread)',
                     inputSchema: {
                         type: 'object',
                         properties: {
@@ -261,7 +261,7 @@ class CodeRabbitMCPServer {
                 },
                 {
                     name: 'coderabbit_workflow_apply',
-                    description: 'Apply the validated fix, commit, push, and resolve the thread',
+                    description: 'Apply the validated fix (complete flow: patch file, commit changes, push to remote, and resolve GitHub thread)',
                     inputSchema: {
                         type: 'object',
                         properties: {

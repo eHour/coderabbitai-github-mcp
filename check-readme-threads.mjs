@@ -10,10 +10,10 @@ const graphqlClient = graphql.defaults({
 
 async function checkReadmeThreads() {
   const query = `
-    query($owner: String!, $name: String!, $number: Int!) {
+    query($owner: String!, $name: String!, $number: Int!, $after: String) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
-          reviewThreads(first: 100) {
+          reviewThreads(first: 100, after: $after) {
             totalCount
             pageInfo {
               hasNextPage
@@ -50,14 +50,11 @@ async function checkReadmeThreads() {
   
   // Fetch all pages
   while (hasMore) {
-    const paginatedQuery = cursor ? 
-      query.replace('first: 100)', `first: 100, after: "${cursor}")`) : 
-      query;
-      
-    const response = await graphqlClient(paginatedQuery, {
+    const response = await graphqlClient(query, {
       owner: 'eHour',
       name: 'coderabbitai-github-mcp',
       number: 1,
+      after: cursor,
     });
     
     const data = response?.repository?.pullRequest?.reviewThreads;
