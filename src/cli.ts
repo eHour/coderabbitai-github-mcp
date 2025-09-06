@@ -18,7 +18,13 @@ program
   .command('start', { isDefault: true })
   .description('Start the MCP server')
   .option('--stdio', 'Use stdio transport')
-  .option('--port <number>', 'Use HTTP transport on specified port', (v) => parseInt(v, 10))
+  .option('--port <number>', 'Use HTTP transport on specified port', (v) => {
+    const port = Number(v);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid --port value: "${v}" (must be 1–65535)`);
+    }
+    return port;
+  })
   .option('--verbose', 'Enable verbose logging', false)
   .action(async (options) => {
     try {
@@ -34,11 +40,8 @@ program
 
       // Transport selection - port takes precedence
       if (options.port) {
-        const port = Number(options.port);
-        if (!Number.isInteger(port) || port < 1 || port > 65535) {
-          throw new Error(`Invalid --port value: "${options.port}" (must be 1–65535)`);
-        }
-        logger.info(`Starting HTTP server on port ${port}`);
+      if (options.port !== undefined) {
+        const port = options.port as number;
         // TODO: Implement HTTP transport
         throw new Error('HTTP transport not yet implemented');
       } else {
