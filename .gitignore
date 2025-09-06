@@ -100,4 +100,4 @@ coderabbit-mcp.json.backup
 claude_desktop_config.json
 
 # Git
-.git/
+.git/dist/
