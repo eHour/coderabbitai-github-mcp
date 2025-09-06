@@ -723,13 +723,15 @@ class CodeRabbitMCPServer {
     logger.info(`Applying fix for thread ${threadId}`);
     
     // Apply the fix using orchestrator's apply method
+    // Skip push to avoid rate limits - we'll push all at once at the end
     const applyResult = await this.orchestrator.applyValidatedFix(
       repo,
       prNumber,
       threadId,
       filePath,
       diffString,
-      commitMessage || `fix: Apply CodeRabbit suggestion for ${filePath}`
+      commitMessage || `fix: Apply CodeRabbit suggestion for ${filePath}`,
+      true // skipPush = true to avoid rate limits
     );
     
     if (!applyResult.success) {
@@ -744,15 +746,39 @@ class CodeRabbitMCPServer {
     const progress = workflowStateManager.getProgress(repo, prNumber);
     
     if (!hasMore) {
+      // Push all changes at once and resolve all threads
+      logger.info('All fixes applied locally. Pushing changes and resolving threads...');
+      
+      try {
+        // Push all commits at once
+        const patcher = (this.orchestrator as any).patcherAgent;
+        await patcher.pushChanges(repo, prNumber);
+        
+        // Now resolve all threads that were successfully applied
+        const state = workflowStateManager.get(repo, prNumber);
+        if (state) {
+          for (const thread of state.threads) {
+            const decision = state.decisions.get(thread.id);
+            if (decision?.isValid && decision.applied) {
+              await this.githubAgent.resolveThread(repo, prNumber, thread.id);
+              logger.info(`Resolved thread ${thread.id}`);
+            }
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to push changes or resolve threads', error);
+        throw error;
+      }
+      
       return {
         data: {
           threadId,
           status: 'applied',
-          message: applyResult.message
+          message: 'All fixes applied and pushed successfully'
         },
         workflow: {
           current_step: 'complete',
-          instruction: `All ${progress.total} CodeRabbit threads have been processed successfully!`,
+          instruction: `All ${progress.total} CodeRabbit threads have been processed successfully! Changes pushed and threads resolved.`,
           progress: `${progress.total} of ${progress.total} threads completed`
         }
       };

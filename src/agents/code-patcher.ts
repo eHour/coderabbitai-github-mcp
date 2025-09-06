@@ -219,17 +219,17 @@ export class CodePatcherAgent {
 
   // Removed custom applyHunk; rely on diff.applyPatch
 
-  async commitAndPush(
+  async commitLocally(
     _repo: string,
     _prNumber: number,
     message: string
   ): Promise<string> {
     if (this.config.dry_run) {
-      this.logger.dryRun('commit and push', { message });
+      this.logger.dryRun('commit locally', { message });
       return 'dry-run-sha';
     }
 
-    this.logger.info('Committing and pushing changes');
+    this.logger.info('Committing changes locally');
     
     try {
       // Stage all changes
@@ -246,16 +246,43 @@ export class CodePatcherAgent {
         throw new Error('Could not get commit SHA');
       }
       
-      // Push to remote
-      await this.git.push();
-      
-      this.logger.info(`Committed and pushed ${commitSha}`);
+      this.logger.info(`Committed locally: ${commitSha}`);
       return commitSha;
       
     } catch (error) {
-      this.logger.error('Failed to commit and push', error);
+      this.logger.error('Failed to commit', error);
       throw error;
     }
+  }
+
+  async pushChanges(
+    _repo: string,
+    _prNumber: number
+  ): Promise<void> {
+    if (this.config.dry_run) {
+      this.logger.dryRun('push changes');
+      return;
+    }
+
+    this.logger.info('Pushing changes to remote');
+    
+    try {
+      await this.git.push();
+      this.logger.info('Successfully pushed changes');
+    } catch (error) {
+      this.logger.error('Failed to push', error);
+      throw error;
+    }
+  }
+
+  async commitAndPush(
+    repo: string,
+    prNumber: number,
+    message: string
+  ): Promise<string> {
+    const commitSha = await this.commitLocally(repo, prNumber, message);
+    await this.pushChanges(repo, prNumber);
+    return commitSha;
   }
 
   async revertCommit(_repo: string, commitSha: string): Promise<void> {

@@ -112,8 +112,9 @@ export class OrchestratorAgent {
     threadId: string,
     filePath: string,
     diffString: string,
-    commitMessage?: string
-  ): Promise<{ success: boolean; message: string }> {
+    commitMessage?: string,
+    skipPush: boolean = false
+  ): Promise<{ success: boolean; message: string; commitSha?: string }> {
     try {
       // Apply the patch using the batch method with a single patch
       const patchRequest = {
@@ -128,14 +129,18 @@ export class OrchestratorAgent {
         throw new Error(`Failed to apply patch: ${result.failed.join(', ')}`);
       }
       
-      // Commit and push
+      // Commit locally
       const message = commitMessage || `Fix: Apply validated fix for thread ${threadId}`;
-      await this.patcherAgent.commitAndPush(repo, prNumber, message);
+      const commitSha = await this.patcherAgent.commitLocally(repo, prNumber, message);
       
-      // Resolve the thread
-      await this.githubAgent.resolveThread(repo, prNumber, threadId);
+      // Only push if not skipped (for batch operations)
+      if (!skipPush) {
+        await this.patcherAgent.pushChanges(repo, prNumber);
+        // Resolve the thread after pushing
+        await this.githubAgent.resolveThread(repo, prNumber, threadId);
+      }
       
-      return { success: true, message: 'Fix applied successfully' };
+      return { success: true, message: 'Fix applied successfully', commitSha };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, message: errorMessage };
