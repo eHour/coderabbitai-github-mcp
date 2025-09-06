@@ -1,25 +1,25 @@
 # CodeRabbit MCP Server
 
-An MCP (Model Context Protocol) server that automates the resolution of CodeRabbit PR review comments using parallel agent architecture.
+An MCP (Model Context Protocol) server that enables AI assistants to interact with CodeRabbit PR review comments on GitHub. This tool bridges the gap between CodeRabbit's automated reviews and AI-powered resolution.
 
 ## Features
 
-- 🚀 **Parallel Processing**: Analyzes multiple review threads simultaneously using worker pools
-- 🤖 **Intelligent Validation**: Hybrid approach using heuristics and optional LLM validation
-- 🔄 **CI/CD Integration**: Waits for CI checks before resolving threads
-- 🛡️ **Safe Rollback**: Automatically reverts commits if CI fails
-- 📊 **Progress Tracking**: Real-time monitoring of thread resolution status
-- 🔍 **Dry Run Mode**: Preview actions without making changes
+- 🔍 **Review Thread Management**: Fetch, analyze, and respond to CodeRabbit review comments
+- 🤖 **Intelligent Validation**: Validate suggestions using AI before applying fixes
+- ✅ **Automated Resolution**: Apply fixes, commit, push, and resolve threads in one workflow
+- 💬 **Interactive Challenges**: Challenge invalid suggestions with explanations
+- 📊 **Workflow Tracking**: Step-by-step progress through validation and resolution
+- 🔧 **Flexible Integration**: Use individual tools or complete workflows
 
 ## Architecture
 
-The system uses a parallel agent architecture with specialized agents:
+The MCP server provides tools for:
 
-- **Orchestrator Agent**: Coordinates all operations and manages workflow
-- **Thread Analyzer Agents** (Pool): Validate CodeRabbit findings in parallel
-- **Code Patcher Agent**: Applies fixes sequentially to avoid conflicts
-- **GitHub API Agent**: Manages all GitHub GraphQL/REST API interactions
-- **Monitor Agent**: Tracks CI status and polls for updates
+- **GitHub Integration**: Fetch PR metadata, review threads, post comments, resolve threads
+- **Git Operations**: Checkout branches, apply patches, commit and push changes
+- **Validation**: Analyze CodeRabbit suggestions before applying
+- **Workflow Management**: Guided step-by-step resolution process
+- **Rate Limiting**: Built-in rate limit management for GitHub API
 
 ## Installation
 
@@ -76,32 +76,41 @@ export ANTHROPIC_API_KEY=your_key_here
 
 ## Usage
 
-### Basic Usage
+### Using with AI Assistants (Claude, etc.)
 
-```bash
-# Process a specific PR
-npx mcp-coderabbit run --repo owner/name --pr 123
+Once configured as an MCP server, AI assistants can use these tools:
 
-# Dry run to preview actions
-npx mcp-coderabbit run --repo owner/name --pr 123 --dry-run
+```typescript
+// Start the workflow
+coderabbit_workflow_start(repo: "owner/name", prNumber: 123)
 
-# Custom settings
-npx mcp-coderabbit run \
-  --repo owner/name \
-  --pr 123 \
-  --max-iterations 5 \
-  --max-workers 8 \
-  --verbose
+// Validate a suggestion
+coderabbit_workflow_validate(
+  repo: "owner/name",
+  prNumber: 123,
+  threadId: "PRRT_xxx",
+  isValid: true,
+  reason: "Correctly identifies missing null check"
+)
+
+// Apply the fix
+coderabbit_workflow_apply(
+  repo: "owner/name",
+  prNumber: 123,
+  threadId: "PRRT_xxx",
+  filePath: "src/file.ts",
+  diffString: "@@ -10,3 +10,3 @@...",
+  commitMessage: "fix: add null check as suggested"
+)
+
+// Or challenge if invalid
+coderabbit_workflow_challenge(
+  repo: "owner/name",
+  prNumber: 123,
+  threadId: "PRRT_xxx",
+  reason: "This check is already performed in the parent function"
+)
 ```
-
-### CLI Options
-
-- `--repo <repo>`: Repository in format owner/name (required)
-- `--pr <number>`: Pull request number (required)
-- `--max-iterations <n>`: Maximum processing iterations (default: 3)
-- `--max-workers <n>`: Maximum parallel analyzers (default: 5)
-- `--dry-run`: Preview actions without making changes
-- `--verbose`: Enable verbose logging
 
 ### MCP Server Mode
 
@@ -240,22 +249,38 @@ Create a `coderabbit-mcp.json` file in your project root:
 
 ## Workflow
 
-1. **Fetch PR Metadata**: Verify PR is open and not draft
-2. **List Review Threads**: Get unresolved CodeRabbit comments
-3. **Parallel Analysis**: Validate each finding concurrently
-4. **Batch Fixes**: Apply all valid fixes in single commit
-5. **CI Verification**: Wait for checks to pass
-6. **Resolution**: Resolve threads or revert on failure
-7. **Iteration**: Poll for updates and repeat
+### Interactive Resolution (Recommended)
+1. **Start Workflow**: `coderabbit_workflow_start` - Fetches first unresolved thread
+2. **Validate**: Review the suggestion and decide if it's valid
+3. **Record Decision**: `coderabbit_workflow_validate` - Record your validation
+4. **Apply or Challenge**:
+   - Valid: `coderabbit_workflow_apply` - Apply fix, commit, push, and resolve
+   - Invalid: `coderabbit_workflow_challenge` - Post explanation to PR
+5. **Continue**: `coderabbit_workflow_status` - Get next thread or completion status
 
-## Comment Templates
+### Manual Tools
+- `get_coderabbit_threads` - Fetch CodeRabbit threads for review
+- `apply_validated_fix` - Apply a specific fix after validation
+- `github_post_review_comment` - Post comments (must start with @coderabbitai)
+- `github_resolve_thread` - Resolve a thread after fixing
 
-The tool uses specific templates when interacting with CodeRabbit:
+## Available MCP Tools
 
-- **Fix Applied**: `@coderabbitai Thanks. Applied the fix in commit {sha}`
-- **Invalid Finding**: `@coderabbitai Thank you for the suggestion. We believe this is not valid because {reason}`
-- **Needs Review**: `@coderabbitai This suggestion requires human review. Confidence: {percent}%`
-- **CI Failed**: `@coderabbitai I attempted to apply the fix, but it failed CI. Reverted.`
+### Workflow Tools (Recommended)
+- `coderabbit_workflow_start` - Start processing CodeRabbit threads
+- `coderabbit_workflow_validate` - Record validation decision
+- `coderabbit_workflow_apply` - Apply fix and resolve thread
+- `coderabbit_workflow_challenge` - Challenge invalid suggestion
+- `coderabbit_workflow_status` - Get current workflow status
+
+### Individual Tools
+- `get_coderabbit_threads` - Fetch unresolved CodeRabbit threads
+- `github_get_pr_meta` - Get PR metadata
+- `github_list_review_threads` - List all review threads
+- `github_post_review_comment` - Post a comment to a thread
+- `github_resolve_thread` - Resolve a review thread
+- `apply_validated_fix` - Apply a validated fix
+- `get_rate_limit_status` - Check GitHub API rate limits
 
 ## Decision Logic
 
