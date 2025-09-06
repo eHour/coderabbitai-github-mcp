@@ -113,15 +113,15 @@ export class GitHubAPIAgent {
     const { owner, name } = this.parseRepo(repo);
     
     // Constrain pageSize to reasonable limits
-    pageSize = Math.min(Math.max(1, pageSize), 50);
+    pageSize = Math.min(Math.max(1, pageSize), 100);
     
     // We'll fetch all threads with pagination support
-    // For now, fetching up to 100 threads total (can be extended with cursor pagination if needed)
+    // GitHub has a bug where resolution status is wrong in first page, so we need ALL threads
     const query = `
-      query($owner: String!, $name: String!, $number: Int!, $first: Int!) {
+      query($owner: String!, $name: String!, $number: Int!, $first: Int!, $after: String) {
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
-            reviewThreads(first: $first) {
+            reviewThreads(first: $first, after: $after) {
               totalCount
               pageInfo {
                 hasNextPage
@@ -162,21 +162,46 @@ export class GitHubAPIAgent {
       }
     `;
 
-    // For simplicity, fetch up to 100 threads initially
-    const response = await this.graphqlClient<any>(query, {
-      owner,
-      name,
-      number: prNumber,
-      first: 100
-    });
+    // Fetch ALL threads with pagination to work around GitHub bug where
+    // resolution status is incorrect in the first page
+    let allThreads: any[] = [];
+    let cursor: string | null = null;
+    let hasNextPage = true;
+    let totalCount = 0;
+    let truncated = false;
+    
+    while (hasNextPage) {
+      const response: any = await this.graphqlClient<any>(query, {
+        owner,
+        name,
+        number: prNumber,
+        first: 100,
+        after: cursor
+      });
 
-    const prNode = response?.repository?.pullRequest;
-    if (!prNode) {
-      this.logger.warn(`PR #${prNumber} not found or not accessible in ${repo}`);
-      return { threads: [], totalCount: 0, hasMore: false };
+      const prNode: any = response?.repository?.pullRequest;
+      if (!prNode) {
+        this.logger.warn(`PR #${prNumber} not found or not accessible in ${repo}`);
+        return { threads: [], totalCount: 0, hasMore: false };
+      }
+      
+      const reviewThreads: any = prNode.reviewThreads ?? { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] };
+      const pageThreads = reviewThreads.nodes ?? [];
+      
+      allThreads = allThreads.concat(pageThreads);
+      totalCount = reviewThreads.totalCount;
+      hasNextPage = reviewThreads.pageInfo?.hasNextPage ?? false;
+      cursor = reviewThreads.pageInfo?.endCursor ?? null;
+      
+      // Limit total fetching to prevent infinite loops
+      if (allThreads.length >= 200) {
+        this.logger.warn('Limiting thread fetch to 200 threads');
+        truncated = true;
+        break;
+      }
     }
-    const reviewThreads = prNode.reviewThreads ?? { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] };
-    const threads = reviewThreads.nodes ?? [];
+    
+    const threads = allThreads;
     
     // Diagnostic logging to debug thread detection
     this.logger.info(`Raw threads from GitHub API for PR #${prNumber}: ${threads.length} total`);
@@ -184,7 +209,8 @@ export class GitHubAPIAgent {
       const authorLogin = thread.commentsFirst?.nodes?.[0]?.author?.login || 'unknown';
       if (authorLogin.includes('coderabbit')) {
         this.logger.info(
-          `  Thread ${index}: Author=${authorLogin}, isResolved=${thread.isResolved}, isOutdated=${thread.isOutdated}, path=${thread.path}`
+          `  Thread ${index}: Author=${authorLogin}, ` +
+          `isResolved=${thread.isResolved}, isOutdated=${thread.isOutdated}, path=${thread.path}`
         );
       }
     });
@@ -197,8 +223,9 @@ export class GitHubAPIAgent {
         continue;
       }
       
-      // Skip collapsed threads but include outdated ones (they might still need resolution)
-      if (thread.isCollapsed) {
+      // Skip collapsed threads only if they're also resolved
+      // GitHub sometimes marks unresolved threads as collapsed incorrectly
+      if (thread.isCollapsed && thread.isResolved) {
         continue;
       }
       
@@ -239,12 +266,12 @@ export class GitHubAPIAgent {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
     const paged = result.slice(start, end);
-    const hasMore = end < result.length || (reviewThreads.pageInfo?.hasNextPage === true);
+    const hasMore = truncated || end < result.length;
     this.logger.info(`Returning ${paged.length}/${result.length} threads (page ${page}, size ${pageSize})`);
     
     return {
       threads: paged,
-      totalCount: reviewThreads.totalCount,
+      totalCount: totalCount,
       hasMore
     };
   }
@@ -331,11 +358,32 @@ export class GitHubAPIAgent {
       }
     `;
 
-    await this.graphqlClient(mutation, {
-      threadId,
-    });
+    // Rate limiting check - atomic acquire to prevent races
+    await this.rateLimiter.acquire();
+    let ok = false;
     
-    return { success: true };
+    try {
+      await this.graphqlClient(mutation, {
+        threadId,
+      });
+      
+      ok = true;
+      return { success: true };
+    } catch (error: any) {
+      // Check if it's a rate limit error
+      const errorMessage = error.message || '';
+      const rateLimitMatch = errorMessage.match(/wait (\d+) minutes? and (\d+) seconds?/i);
+      if (rateLimitMatch) {
+        const minutes = parseInt(rateLimitMatch[1] || '0', 10);
+        const seconds = parseInt(rateLimitMatch[2] || '0', 10);
+        this.rateLimiter.handleRateLimitError(minutes, seconds);
+        this.logger.error(`GitHub rate limit: wait ${minutes}m ${seconds}s`);
+      }
+      
+      throw error;
+    } finally {
+      this.rateLimiter.endRequest(ok);
+    }
   }
 
   async waitForCheckRuns(

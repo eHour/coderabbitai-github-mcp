@@ -11,7 +11,7 @@ import { MessageBus } from './lib/message-bus.js';
 import { StateManager } from './lib/state-manager.js';
 import { Logger } from './lib/logger.js';
 import { workflowStateManager } from './lib/workflow-state.js';
-import { Config, WorkflowToolResponse } from './types/index.js';
+import type { Config, WorkflowToolResponse, ReviewThread } from './types/index.js';
 import { loadConfig, validateGitHubToken } from './config/loader.js';
 import { GitHubAPIAgent } from './agents/github-api.js';
 
@@ -141,7 +141,7 @@ class CodeRabbitMCPServer {
         },
         {
           name: 'code_apply_unified_diff',
-          description: 'Apply a unified diff patch to a file',
+          description: 'Apply a unified diff patch to a file (does NOT commit or push - use workflow tools for complete flow)',
           inputSchema: {
             type: 'object',
             properties: {
@@ -210,7 +210,7 @@ class CodeRabbitMCPServer {
         },
         {
           name: 'apply_validated_fix',
-          description: 'Apply a fix that has been validated externally (by Claude)',
+          description: 'Apply a validated fix (complete flow: patch file, commit, push to remote, and resolve thread)',
           inputSchema: {
             type: 'object',
             properties: {
@@ -283,7 +283,7 @@ class CodeRabbitMCPServer {
         },
         {
           name: 'coderabbit_workflow_apply',
-          description: 'Apply the validated fix, commit, push, and resolve the thread',
+          description: 'Apply the validated fix (complete flow: patch file, commit changes, push to remote, and resolve GitHub thread)',
           inputSchema: {
             type: 'object',
             properties: {
@@ -393,7 +393,7 @@ class CodeRabbitMCPServer {
             };
           }
           
-          case 'run_orchestrator':
+          case 'run_orchestrator': {
             const result = await this.orchestrator.run(
               args?.repo as string,
               args?.prNumber as number,
@@ -409,6 +409,7 @@ class CodeRabbitMCPServer {
                 },
               ],
             };
+          }
 
           // Workflow-aware tool handlers
           case 'coderabbit_workflow_start': {
@@ -522,6 +523,52 @@ class CodeRabbitMCPServer {
     });
   }
 
+  // Helper to check if CodeRabbit has acknowledged an error in the thread
+  private checkForSelfCorrection(thread: ReviewThread): boolean {
+    // Check all comments in the thread for CodeRabbit self-corrections
+    if (!thread.comments || thread.comments.length < 2) {
+      return false;
+    }
+    
+    // Look for CodeRabbit's follow-up comments acknowledging error
+    const coderabbitComments = thread.comments.filter(
+      (c: any) => c.author.login === 'coderabbitai[bot]' || c.author.login === 'coderabbitai'
+    );
+    
+    if (coderabbitComments.length < 2) {
+      return false;
+    }
+    
+    // Check if later comments contain acknowledgment patterns
+    const acknowledgmentPatterns = [
+      /you['']?re absolutely (correct|right)/i,
+      /you are absolutely (correct|right)/i,
+      /i apologize for/i,
+      /my (initial|previous) (comment|suggestion) was (incorrect|wrong|inaccurate)/i,
+      /thank you for (the correction|pointing this out|clarifying)/i,
+      /i was (wrong|incorrect|mistaken)/i,
+      /you['']?re (correct|right)[,.]? (this|the|my)/i,
+      /i stand corrected/i,
+      /my mistake/i,
+      /upon (further|closer) (review|inspection)/i,
+      /i misunderstood/i,
+      /incorrectly (suggested|identified|flagged)/i
+    ];
+    
+    // Check comments after the first one for acknowledgment
+    for (let i = 1; i < coderabbitComments.length; i++) {
+      const commentBody = coderabbitComments[i].body;
+      for (const pattern of acknowledgmentPatterns) {
+        if (pattern.test(commentBody)) {
+          logger.info(`Found CodeRabbit self-correction in thread ${thread.id}: "${commentBody.substring(0, 100)}..."`);
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
   // Workflow tool handlers
   private async handleWorkflowStart(
     repo: string,
@@ -549,9 +596,17 @@ class CodeRabbitMCPServer {
       };
     }
     
+    // Check if first thread has CodeRabbit self-correction
+    const firstThread = coderabbitThreads[0];
+    const hasSelfCorrection = this.checkForSelfCorrection(firstThread);
+    
     // Initialize workflow state
     workflowStateManager.create(repo, prNumber, coderabbitThreads);
-    const firstThread = coderabbitThreads[0];
+    
+    // If CodeRabbit has self-corrected, include special instruction
+    const instruction = hasSelfCorrection
+      ? 'CodeRabbit has already acknowledged this suggestion was incorrect. You should resolve this thread immediately.'
+      : 'Analyze this CodeRabbit suggestion and determine if it\'s valid and beneficial. The suggestion is for ' + (firstThread.path || 'the PR') + (firstThread.line ? ' at line ' + firstThread.line : '') + '.';
     
     return {
       data: {
@@ -560,22 +615,27 @@ class CodeRabbitMCPServer {
           path: firstThread.path,
           line: firstThread.line,
           body: firstThread.body,
-          createdAt: firstThread.createdAt
+          createdAt: firstThread.createdAt,
+          hasSelfCorrection
         },
         total_threads: coderabbitThreads.length,
         thread_number: 1
       },
       workflow: {
-        current_step: 'validate',
-        instruction: `Analyze this CodeRabbit suggestion and determine if it's valid and beneficial. The suggestion is for ${firstThread.path}${firstThread.line ? ` at line ${firstThread.line}` : ''}.`,
-        validation_criteria: [
+        current_step: hasSelfCorrection ? 'resolve' : 'validate',
+        instruction,
+        validation_criteria: hasSelfCorrection ? [] : [
           'Is the suggestion technically correct?',
           'Will it improve code quality or fix a real issue?',
           'Could applying this change introduce bugs or break functionality?',
           'Is the suggestion clear and actionable?'
         ],
-        next_tool: 'coderabbit_workflow_validate',
-        next_params: {
+        next_tool: hasSelfCorrection ? 'github_resolve_thread' : 'coderabbit_workflow_validate',
+        next_params: hasSelfCorrection ? {
+          repo,
+          prNumber,
+          threadId: firstThread.id
+        } : {
           repo,
           prNumber,
           threadId: firstThread.id
@@ -663,13 +723,15 @@ class CodeRabbitMCPServer {
     logger.info(`Applying fix for thread ${threadId}`);
     
     // Apply the fix using orchestrator's apply method
+    // Skip push to avoid rate limits - we'll push all at once at the end
     const applyResult = await this.orchestrator.applyValidatedFix(
       repo,
       prNumber,
       threadId,
       filePath,
       diffString,
-      commitMessage || `fix: Apply CodeRabbit suggestion for ${filePath}`
+      commitMessage || `fix: Apply CodeRabbit suggestion for ${filePath}`,
+      true // skipPush = true to avoid rate limits
     );
     
     if (!applyResult.success) {
@@ -684,15 +746,39 @@ class CodeRabbitMCPServer {
     const progress = workflowStateManager.getProgress(repo, prNumber);
     
     if (!hasMore) {
+      // Push all changes at once and resolve all threads
+      logger.info('All fixes applied locally. Pushing changes and resolving threads...');
+      
+      try {
+        // Push all commits at once
+        const patcher = (this.orchestrator as any).patcherAgent;
+        await patcher.pushChanges(repo, prNumber);
+        
+        // Now resolve all threads that were successfully applied
+        const state = workflowStateManager.get(repo, prNumber);
+        if (state) {
+          for (const thread of state.threads) {
+            const decision = state.decisions.get(thread.id);
+            if (decision?.isValid && decision.applied) {
+              await this.githubAgent.resolveThread(repo, prNumber, thread.id);
+              logger.info(`Resolved thread ${thread.id}`);
+            }
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to push changes or resolve threads', error);
+        throw error;
+      }
+      
       return {
         data: {
           threadId,
           status: 'applied',
-          message: applyResult.message
+          message: 'All fixes applied and pushed successfully'
         },
         workflow: {
           current_step: 'complete',
-          instruction: `All ${progress.total} CodeRabbit threads have been processed successfully!`,
+          instruction: `All ${progress.total} CodeRabbit threads have been processed successfully! Changes pushed and threads resolved.`,
           progress: `${progress.total} of ${progress.total} threads completed`
         }
       };
@@ -704,6 +790,9 @@ class CodeRabbitMCPServer {
       throw new Error('Next thread not found');
     }
     
+    // Check if next thread has self-correction
+    const nextHasSelfCorrection = this.checkForSelfCorrection(nextThread);
+    
     return {
       data: {
         threadId,
@@ -713,25 +802,30 @@ class CodeRabbitMCPServer {
           id: nextThread.id,
           path: nextThread.path,
           line: nextThread.line,
-          body: nextThread.body
+          body: nextThread.body,
+          hasSelfCorrection: nextHasSelfCorrection
         }
       },
       workflow: {
-        current_step: 'validate',
-        instruction: `Fix applied successfully. Now validate the next CodeRabbit suggestion for ${nextThread.path}.`,
-        next_tool: 'coderabbit_workflow_validate',
+        current_step: nextHasSelfCorrection ? 'resolve' : 'validate',
+        instruction: nextHasSelfCorrection 
+          ? `Fix applied successfully. The next thread has a self-correction from CodeRabbit - it should be resolved immediately.`
+          : `Fix applied successfully. Now validate the next CodeRabbit suggestion for ${nextThread.path}.`,
+        next_tool: nextHasSelfCorrection ? 'github_resolve_thread' : 'coderabbit_workflow_validate',
         next_params: {
           repo,
           prNumber,
           threadId: nextThread.id
         },
-        validation_criteria: [
+        validation_criteria: nextHasSelfCorrection ? [] : [
           'Is the suggestion technically correct?',
           'Will it improve code quality?',
           'Could it introduce bugs?'
         ],
         progress: `${progress.processed + 1} of ${progress.total} threads`,
-        reminder: 'Continue processing threads one by one.'
+        reminder: nextHasSelfCorrection 
+          ? 'This thread has a CodeRabbit self-correction. Resolve it immediately.'
+          : 'Continue processing threads one by one.'
       }
     };
   }
@@ -777,6 +871,9 @@ class CodeRabbitMCPServer {
       throw new Error('Next thread not found');
     }
     
+    // Check if next thread has self-correction
+    const nextHasSelfCorrection = this.checkForSelfCorrection(nextThread);
+    
     return {
       data: {
         threadId,
@@ -786,25 +883,30 @@ class CodeRabbitMCPServer {
           id: nextThread.id,
           path: nextThread.path,
           line: nextThread.line,
-          body: nextThread.body
+          body: nextThread.body,
+          hasSelfCorrection: nextHasSelfCorrection
         }
       },
       workflow: {
-        current_step: 'validate',
-        instruction: `Challenge posted. Now validate the next CodeRabbit suggestion for ${nextThread.path}.`,
-        next_tool: 'coderabbit_workflow_validate',
+        current_step: nextHasSelfCorrection ? 'resolve' : 'validate',
+        instruction: nextHasSelfCorrection
+          ? `Challenge posted. The next thread has a self-correction from CodeRabbit - it should be resolved immediately.`
+          : `Challenge posted. Now validate the next CodeRabbit suggestion for ${nextThread.path}.`,
+        next_tool: nextHasSelfCorrection ? 'github_resolve_thread' : 'coderabbit_workflow_validate',
         next_params: {
           repo,
           prNumber,
           threadId: nextThread.id
         },
-        validation_criteria: [
+        validation_criteria: nextHasSelfCorrection ? [] : [
           'Is the suggestion technically correct?',
           'Will it improve code quality?',
           'Could it introduce bugs?'
         ],
         progress: `${progress.processed + 1} of ${progress.total} threads`,
-        reminder: 'Continue processing threads one by one.'
+        reminder: nextHasSelfCorrection
+          ? 'This thread has a CodeRabbit self-correction. Resolve it immediately.'
+          : 'Continue processing threads one by one.'
       }
     };
   }

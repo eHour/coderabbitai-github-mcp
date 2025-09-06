@@ -112,8 +112,9 @@ export class OrchestratorAgent {
     threadId: string,
     filePath: string,
     diffString: string,
-    commitMessage?: string
-  ): Promise<{ success: boolean; message: string }> {
+    commitMessage?: string,
+    skipPush: boolean = false
+  ): Promise<{ success: boolean; message: string; commitSha?: string }> {
     try {
       // Apply the patch using the batch method with a single patch
       const patchRequest = {
@@ -128,14 +129,18 @@ export class OrchestratorAgent {
         throw new Error(`Failed to apply patch: ${result.failed.join(', ')}`);
       }
       
-      // Commit and push
+      // Commit locally
       const message = commitMessage || `Fix: Apply validated fix for thread ${threadId}`;
-      await this.patcherAgent.commitAndPush(repo, prNumber, message);
+      const commitSha = await this.patcherAgent.commitLocally(repo, prNumber, message);
       
-      // Resolve the thread
-      await this.githubAgent.resolveThread(repo, prNumber, threadId);
+      // Only push if not skipped (for batch operations)
+      if (!skipPush) {
+        await this.patcherAgent.pushChanges(repo, prNumber);
+        // Resolve the thread after pushing
+        await this.githubAgent.resolveThread(repo, prNumber, threadId);
+      }
       
-      return { success: true, message: 'Fix applied successfully' };
+      return { success: true, message: 'Fix applied successfully', commitSha };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, message: errorMessage };
@@ -438,7 +443,8 @@ export class OrchestratorAgent {
             repo,
             prNumber,
             invalid.threadId,
-            `@coderabbitai Thank you for the suggestion. We believe this is not valid because: ${invalid.reasoning}. Could you point to a failing case if you see one?`
+            '@coderabbitai Thank you for the suggestion. We believe this is not valid because: ' +
+            `${invalid.reasoning}. Could you point to a failing case if you see one?`
           );
         } else {
           this.logger.dryRun('post invalid comment', { threadId: invalid.threadId });
@@ -448,8 +454,11 @@ export class OrchestratorAgent {
       for (const needsReview of needsReviewThreads) {
         if (!dryRun) {
           const message = needsReview.result === ValidationResult.UNPATCHABLE
-            ? '@coderabbitai I could not apply this suggestion as the patch failed. The surrounding code may have changed. Please provide an updated suggestion.'
-            : `@coderabbitai This suggestion requires human review. My analysis confidence is below threshold (${Math.round(needsReview.confidence * 100)}%). Could you clarify the expected behavior?`;
+            ? '@coderabbitai I could not apply this suggestion as the patch failed. ' +
+              'The surrounding code may have changed. Please provide an updated suggestion.'
+            : '@coderabbitai This suggestion requires human review. ' +
+              `My analysis confidence is below threshold (${Math.round(needsReview.confidence * 100)}%). ` +
+              'Could you clarify the expected behavior?';
           
           await this.githubAgent.postComment(repo, prNumber, needsReview.threadId, message);
         } else {

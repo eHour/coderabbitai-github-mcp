@@ -58,7 +58,8 @@ export interface ThreadState {
 
 export interface AgentMessage {
   id: string;
-  type: 'ANALYZE_THREAD' | 'APPLY_PATCH' | 'POST_COMMENT' | 'CHECK_CI' | 'RESOLVE_THREAD' | 'CODERABBIT_UPDATE' | 'RESPONSE';
+  type: 'ANALYZE_THREAD' | 'APPLY_PATCH' | 'POST_COMMENT' | 'CHECK_CI' | 
+    'RESOLVE_THREAD' | 'CODERABBIT_UPDATE' | 'RESPONSE';
   source: string;
   target: string;
   payload: any;
@@ -68,7 +69,7 @@ export interface AgentMessage {
 
 export interface PatchRequest {
   threadId: string;
-  filePath: string;
+  filePath?: string;
   patch: string;
   lineNumber?: number;
 }
@@ -116,7 +117,7 @@ export type CheckRunConclusion =
   | null;
 
 export interface WorkflowInstruction {
-  current_step: 'start' | 'validate' | 'apply' | 'challenge' | 'next' | 'complete';
+  current_step: 'start' | 'validate' | 'apply' | 'challenge' | 'next' | 'complete' | 'resolve';
   instruction: string;
   next_tool?: string;
   next_params?: Record<string, any>;
