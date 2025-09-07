@@ -94,16 +94,32 @@ export class ThreadAnalyzerAgent {
     code?: string;
     file?: string;
     line?: number;
+    startLine?: number;
+    committableSuggestion?: string;
+    aiPrompt?: string;
   } {
     const body = thread.body;
     
-    // Extract suggestion type (e.g., "Consider", "Suggestion", "Critical")
-    const typeMatch = body.match(/^(?:\*\*)?(\w+)(?:\*\*)?:/);
-    const type = typeMatch ? typeMatch[1].toLowerCase() : 'suggestion';
+    // Extract suggestion type from emoji or text
+    let type = 'suggestion';
+    if (body.includes('🔧') || body.includes('Refactor')) type = 'refactor';
+    else if (body.includes('🐛') || body.includes('bug')) type = 'bug';
+    else if (body.includes('⚠️') || body.includes('warning')) type = 'warning';
+    else if (body.includes('🔒') || body.includes('security')) type = 'security';
+    else if (body.includes('⚡') || body.includes('performance')) type = 'performance';
     
     // Extract code blocks
-    const codeMatch = body.match(/```[\s\S]*?```/g);
-    const code = codeMatch ? codeMatch[0] : undefined;
+    const codeMatches = body.match(/```[\s\S]*?```/g) || [];
+    const code = codeMatches[0];
+    
+    // Extract committable suggestion if present
+    const committableMatch = body.match(/📝?\s*Committable suggestion[\s\S]*?```[\s\S]*?```/);
+    const committableSuggestion = committableMatch ? 
+      committableMatch[0].match(/```[\s\S]*?```/)?.[0] : undefined;
+    
+    // Extract AI prompt if present
+    const aiPromptMatch = body.match(/🤖?\s*Prompt for AI Agents[\s\S]*$/);
+    const aiPrompt = aiPromptMatch ? aiPromptMatch[0] : undefined;
     
     return {
       type,
@@ -111,6 +127,9 @@ export class ThreadAnalyzerAgent {
       code,
       file: thread.path,
       line: thread.line,
+      startLine: thread.startLine,
+      committableSuggestion,
+      aiPrompt,
     };
   }
 
@@ -159,7 +178,7 @@ export class ThreadAnalyzerAgent {
     }
     
     // Security issues are always valid
-    if (suggestion.type === 'critical' || 
+    if (suggestion.type === 'security' || 
         suggestion.description.toLowerCase().includes('security') ||
         suggestion.description.toLowerCase().includes('vulnerability')) {
       return {
@@ -169,6 +188,56 @@ export class ThreadAnalyzerAgent {
         reasoning: 'Security/critical issue',
         patch: this.generatePatchFromSuggestion(suggestion),
       };
+    }
+    
+    // Bug fixes are usually valid
+    if (suggestion.type === 'bug') {
+      return {
+        threadId: thread.id,
+        result: ValidationResult.VALID,
+        confidence: 0.8,
+        reasoning: 'Bug fix suggestion',
+        patch: this.generatePatchFromSuggestion(suggestion),
+      };
+    }
+    
+    // Performance improvements are usually valid
+    if (suggestion.type === 'performance') {
+      return {
+        threadId: thread.id,
+        result: ValidationResult.VALID,
+        confidence: 0.7,
+        reasoning: 'Performance improvement',
+        patch: this.generatePatchFromSuggestion(suggestion),
+      };
+    }
+    
+    // If we have a committable suggestion, it's likely valid
+    if (suggestion.committableSuggestion) {
+      const patch = this.generatePatchFromSuggestion(suggestion);
+      if (patch) {
+        return {
+          threadId: thread.id,
+          result: ValidationResult.VALID,
+          confidence: 0.75,
+          reasoning: 'Has committable suggestion with generated patch',
+          patch,
+        };
+      }
+    }
+    
+    // If we have an AI prompt, CodeRabbit thinks it needs fixing
+    if (suggestion.aiPrompt) {
+      const patch = this.generatePatchFromSuggestion(suggestion);
+      if (patch) {
+        return {
+          threadId: thread.id,
+          result: ValidationResult.VALID,
+          confidence: 0.65,
+          reasoning: 'Has AI prompt indicating actionable suggestion',
+          patch,
+        };
+      }
     }
     
     return null;
@@ -195,20 +264,108 @@ export class ThreadAnalyzerAgent {
   private generatePatchFromSuggestion(
     suggestion: ReturnType<typeof this.extractSuggestion>
   ): string | undefined {
-    if (!suggestion.code) {
-      return undefined;
+    // First check if we have a committable suggestion
+    if (suggestion.committableSuggestion) {
+      return this.createPatchFromCommittable(suggestion);
     }
     
-    // Extract diff from code block if it's already a diff
-    if (suggestion.code.includes('```diff')) {
+    // Check if the code block contains a diff
+    if (suggestion.code?.includes('```diff')) {
       return suggestion.code
         .replace(/```diff\n?/, '')
         .replace(/```$/, '')
         .trim();
     }
     
-    // Otherwise, try to generate a simple patch
-    // This is a simplified version - real implementation would need more context
+    // Try to create a patch from the visual diff format (- and + lines)
+    if (suggestion.code && (suggestion.code.includes('- ') || suggestion.code.includes('+ '))) {
+      return this.createPatchFromVisualDiff(suggestion);
+    }
+    
     return undefined;
+  }
+
+  private createPatchFromCommittable(
+    suggestion: ReturnType<typeof this.extractSuggestion>
+  ): string | undefined {
+    if (!suggestion.file || !suggestion.committableSuggestion) {
+      return undefined;
+    }
+
+    // Extract the code from the committable suggestion
+    const newCode = suggestion.committableSuggestion
+      .replace(/```[\w]*\n?/, '')
+      .replace(/```$/, '')
+      .trim();
+
+    // Create a unified diff header
+    const fileName = suggestion.file;
+    const startLine = suggestion.startLine || suggestion.line || 1;
+    const endLine = suggestion.line || startLine + 10; // Estimate if not provided
+    
+    // Build a simple unified diff
+    // Note: This is a simplified version. In production, you'd want to:
+    // 1. Fetch the actual file content
+    // 2. Calculate proper line numbers
+    // 3. Generate accurate context lines
+    const patch = [
+      `--- a/${fileName}`,
+      `+++ b/${fileName}`,
+      `@@ -${startLine},${endLine - startLine} +${startLine},${endLine - startLine} @@`,
+      ...newCode.split('\n').map(line => `+${line}`)
+    ].join('\n');
+
+    return patch;
+  }
+
+  private createPatchFromVisualDiff(
+    suggestion: ReturnType<typeof this.extractSuggestion>
+  ): string | undefined {
+    if (!suggestion.file || !suggestion.code) {
+      return undefined;
+    }
+
+    // Extract lines from the code block
+    const codeContent = suggestion.code
+      .replace(/```[\w]*\n?/, '')
+      .replace(/```$/, '')
+      .trim();
+
+    const lines = codeContent.split('\n');
+    const removedLines: string[] = [];
+    const addedLines: string[] = [];
+    const contextLines: string[] = [];
+
+    // Parse the visual diff format
+    for (const line of lines) {
+      if (line.startsWith('- ') || line.startsWith('-\t')) {
+        removedLines.push(line.substring(2));
+      } else if (line.startsWith('+ ') || line.startsWith('+\t')) {
+        addedLines.push(line.substring(2));
+      } else if (!line.startsWith('---') && !line.startsWith('+++') && !line.startsWith('@@')) {
+        // Context line (neither + nor -)
+        contextLines.push(line);
+      }
+    }
+
+    if (removedLines.length === 0 && addedLines.length === 0) {
+      return undefined;
+    }
+
+    // Build unified diff
+    const fileName = suggestion.file;
+    const startLine = suggestion.startLine || suggestion.line || 1;
+    const removedCount = removedLines.length || 1;
+    const addedCount = addedLines.length || 1;
+
+    const patch = [
+      `--- a/${fileName}`,
+      `+++ b/${fileName}`,
+      `@@ -${startLine},${removedCount} +${startLine},${addedCount} @@`,
+      ...removedLines.map(line => `-${line}`),
+      ...addedLines.map(line => `+${line}`)
+    ].join('\n');
+
+    return patch;
   }
 }
