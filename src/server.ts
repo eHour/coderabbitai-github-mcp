@@ -759,7 +759,7 @@ class CodeRabbitMCPServer {
         if (state) {
           for (const thread of state.threads) {
             const decision = state.decisions.get(thread.id);
-            if (decision?.isValid && decision.applied) {
+            if (decision?.isValid && decision.fixApplied) {
               await this.githubAgent.resolveThread(repo, prNumber, thread.id);
               logger.info(`Resolved thread ${thread.id}`);
             }

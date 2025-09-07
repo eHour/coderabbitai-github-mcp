@@ -39,9 +39,7 @@ program
       validateGitHubToken(config);
 
       // Transport selection - port takes precedence
-      if (options.port) {
       if (options.port !== undefined) {
-        const port = options.port as number;
         // TODO: Implement HTTP transport
         throw new Error('HTTP transport not yet implemented');
       } else {
