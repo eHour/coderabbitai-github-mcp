@@ -260,7 +260,7 @@ export class CodePatcherAgent {
     _prNumber: number
   ): Promise<void> {
     if (this.config.dry_run) {
-      this.logger.dryRun('push changes');
+      this.logger.dryRun('push changes', {});
       return;
     }
 

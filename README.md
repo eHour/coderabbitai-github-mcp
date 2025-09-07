@@ -27,10 +27,10 @@ The MCP server provides tools for:
 npm install -g mcp-coderabbit
 ```
 
-Or run directly with npx:
+For development/testing, you can run the orchestrator directly:
 
 ```bash
-npx mcp-coderabbit run --repo owner/name --pr 123
+npx mcp-coderabbit test --repo owner/name --pr 123
 ```
 
 ## Prerequisites
@@ -62,18 +62,6 @@ Set your token as an environment variable:
 export GITHUB_TOKEN=your_token_here
 ```
 
-### Optional: LLM Configuration
-
-For intelligent validation, configure an LLM provider:
-
-```bash
-# OpenAI
-export OPENAI_API_KEY=your_key_here
-
-# OR Anthropic
-export ANTHROPIC_API_KEY=your_key_here
-```
-
 ## Usage
 
 ### Using with AI Assistants (Claude, etc.)
@@ -93,7 +81,7 @@ coderabbit_workflow_validate(
   reason: "Correctly identifies missing null check"
 )
 
-// Apply the fix (this will apply, commit, push, and resolve in one call)
+// Apply the fix (applies and commits locally; push + resolve happen in batch at the end)
 coderabbit_workflow_apply(
   repo: "owner/name",
   prNumber: 123,
@@ -104,9 +92,8 @@ coderabbit_workflow_apply(
 )
 // The tool automatically:
 // 1. Applies the patch to the file
-// 2. Commits with the provided message
-// 3. Pushes to the remote branch
-// 4. Resolves the GitHub review thread
+// 2. Commits with the provided message (local only)
+// Finalization (push + resolve) occurs automatically after all threads are processed
 
 // Or challenge if invalid
 coderabbit_workflow_challenge(
@@ -122,10 +109,10 @@ coderabbit_workflow_challenge(
 You can also run as a standalone MCP server:
 
 ```bash
-npx mcp-coderabbit server
+npx mcp-coderabbit start
 ```
 
-This starts the MCP server that can be used by MCP clients.
+This starts the MCP server that can be used by MCP clients (uses stdio transport by default).
 
 #### Global Installation in Claude Code
 
@@ -150,7 +137,7 @@ To install this MCP server globally in Claude Code so it's available in all your
    # Add the MCP server with environment variable
    claude mcp add-json coderabbit '{
      "command": "mcp-coderabbit",
-     "args": ["server"],
+     "args": ["start"],
      "env": {
        "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
      }
@@ -206,12 +193,6 @@ Create a `coderabbit-mcp.json` file in your project root:
     "batchSize": 10
   },
   "validation": {
-    "llm": {
-      "provider": "openai",
-      "model": "gpt-4-turbo",
-      "temperature": 0.2,
-      "confidenceThreshold": 0.7
-    },
     "autoAccept": [
       "security/*",
       "bug/*",
@@ -239,14 +220,9 @@ Create a `coderabbit-mcp.json` file in your project root:
 - `batchSize`: Maximum fixes to apply in one commit
 
 #### Validation
-- `llm`: Optional LLM configuration for intelligent validation
-  - `provider`: "openai" or "anthropic"
-  - `model`: Model name (e.g., "gpt-4-turbo")
-  - `temperature`: LLM temperature (0-1)
-  - `confidenceThreshold`: Minimum confidence to auto-apply (0-1)
-- `autoAccept`: Patterns for auto-accepting suggestions
-- `autoReject`: Patterns for auto-rejecting suggestions
-- `conventions`: Path to coding standards document
+- `autoAccept`: Patterns for auto-accepting suggestions (uses glob patterns)
+- `autoReject`: Patterns for auto-rejecting suggestions (uses glob patterns)
+- `conventions`: Path to coding standards document (for documentation only)
 
 #### CI
 - `waitTimeout`: Maximum time to wait for CI checks (ms)
@@ -279,7 +255,7 @@ Create a `coderabbit-mcp.json` file in your project root:
 ### Workflow Tools (Recommended)
 - `coderabbit_workflow_start` - Start processing CodeRabbit threads
 - `coderabbit_workflow_validate` - Record validation decision
-- `coderabbit_workflow_apply` - Apply fix, commit, push, and resolve thread (all-in-one)
+- `coderabbit_workflow_apply` - Apply fix and commit locally (batch push/resolve happens at workflow end)
 - `coderabbit_workflow_challenge` - Challenge invalid suggestion with explanation
 - `coderabbit_workflow_status` - Get current workflow status and next thread
 
@@ -294,20 +270,22 @@ Create a `coderabbit-mcp.json` file in your project root:
 
 ## Decision Logic
 
+The thread analyzer uses heuristic-based validation:
+
 ### Automatic Acceptance
-- Security vulnerabilities
-- Critical bugs
-- Matches auto-accept patterns
+- Security vulnerabilities (detected by keywords)
+- Critical bugs (marked as "critical" by CodeRabbit)
+- Matches auto-accept patterns (glob patterns)
 
 ### Automatic Rejection
-- Generated/minified files
+- Generated/minified files (*.min.js, *.bundle.js, *.map, *.lock)
 - Binary files
-- Matches auto-reject patterns
+- Matches auto-reject patterns (glob patterns)
 
-### LLM Validation
-- When confidence > threshold: Apply fix
-- When confidence < threshold: Request human review
-- On error: Mark as unpatchable
+### Manual Review Required
+- No heuristic match found
+- Ambiguous suggestions
+- Complex refactoring suggestions
 
 ## Development
 
@@ -354,7 +332,7 @@ src/
 Enable verbose logging for troubleshooting:
 
 ```bash
-npx mcp-coderabbit run --repo owner/name --pr 123 --verbose
+npx mcp-coderabbit test --repo owner/name --pr 123 --verbose
 ```
 
 Set log file for persistent logging:
