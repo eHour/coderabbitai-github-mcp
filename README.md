@@ -81,7 +81,7 @@ coderabbit_workflow_validate(
   reason: "Correctly identifies missing null check"
 )
 
-// Apply the fix (this will apply, commit, push, and resolve in one call)
+// Apply the fix (applies and commits locally; push + resolve happen in batch at the end)
 coderabbit_workflow_apply(
   repo: "owner/name",
   prNumber: 123,
@@ -92,9 +92,8 @@ coderabbit_workflow_apply(
 )
 // The tool automatically:
 // 1. Applies the patch to the file
-// 2. Commits with the provided message
-// 3. Pushes to the remote branch
-// 4. Resolves the GitHub review thread
+// 2. Commits with the provided message (local only)
+// Finalization (push + resolve) occurs automatically after all threads are processed
 
 // Or challenge if invalid
 coderabbit_workflow_challenge(
@@ -256,7 +255,7 @@ Create a `coderabbit-mcp.json` file in your project root:
 ### Workflow Tools (Recommended)
 - `coderabbit_workflow_start` - Start processing CodeRabbit threads
 - `coderabbit_workflow_validate` - Record validation decision
-- `coderabbit_workflow_apply` - Apply fix, commit, push, and resolve thread (all-in-one)
+- `coderabbit_workflow_apply` - Apply fix and commit locally (batch push/resolve happens at workflow end)
 - `coderabbit_workflow_challenge` - Challenge invalid suggestion with explanation
 - `coderabbit_workflow_status` - Get current workflow status and next thread
 
