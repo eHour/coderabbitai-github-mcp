@@ -559,7 +559,7 @@ class CodeRabbitMCPServer {
             };
           }
             
-          default:
+          default: {
             // Delegate to individual tools
             logger.debug(`Delegating tool ${name} to orchestrator`);
             const toolResult = await this.orchestrator.executeTool(name, args);
@@ -574,6 +574,7 @@ class CodeRabbitMCPServer {
                 },
               ],
             };
+          }
         }
       } catch (error) {
         logger.error(`Tool execution failed: ${name}`, error);
