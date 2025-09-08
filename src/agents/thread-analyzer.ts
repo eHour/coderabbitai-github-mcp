@@ -98,7 +98,7 @@ export class ThreadAnalyzerAgent {
     committableSuggestion?: string;
     aiPrompt?: string;
   } {
-    const body = thread.body;
+    const body = thread.body ?? '';
     
     // Extract suggestion type from emoji or text (case-insensitive)
     const lc = body.toLowerCase();
