@@ -39,37 +39,66 @@ class CodeRabbitMCPServer {
   }
 
   constructor() {
-    this.server = new Server(
-      {
-        name: 'mcp-coderabbit',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {
-          tools: {},
+    logger.info('Initializing CodeRabbit MCP Server...');
+    
+    try {
+      this.server = new Server(
+        {
+          name: 'mcp-coderabbit',
+          version: '1.0.0',
         },
-      }
-    );
+        {
+          capabilities: {
+            tools: {},
+          },
+        }
+      );
+      logger.info('MCP Server instance created successfully');
 
-    this.messageBus = new MessageBus();
-    this.stateManager = new StateManager();
-    this.config = loadConfig();
-    validateGitHubToken(this.config);
-    this.orchestrator = new OrchestratorAgent(
-      this.messageBus,
-      this.stateManager,
-      this.config
-    );
-    this.githubAgent = new GitHubAPIAgent(
-      this.messageBus,
-      this.config
-    );
+      this.messageBus = new MessageBus();
+      logger.debug('MessageBus initialized');
+      
+      this.stateManager = new StateManager();
+      logger.debug('StateManager initialized');
+      
+      this.config = loadConfig();
+      logger.info('Configuration loaded', { 
+        hasGithubToken: !!this.config.github.token,
+        maxAnalyzers: this.config.parallelism.maxAnalyzers,
+        maxIterations: this.config.max_iterations,
+        dryRun: this.config.dry_run
+      });
+      
+      validateGitHubToken(this.config);
+      logger.debug('GitHub token validated');
+      
+      this.orchestrator = new OrchestratorAgent(
+        this.messageBus,
+        this.stateManager,
+        this.config
+      );
+      logger.debug('OrchestratorAgent initialized');
+      
+      this.githubAgent = new GitHubAPIAgent(
+        this.messageBus,
+        this.config
+      );
+      logger.debug('GitHubAPIAgent initialized');
 
-    this.setupTools();
+      this.setupTools();
+      logger.info('Tool setup completed');
+    } catch (error) {
+      logger.error('Failed to initialize server components', error);
+      throw error;
+    }
   }
 
   private setupTools() {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    logger.info('Setting up MCP tools...');
+    
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      logger.debug('Handling ListToolsRequest');
+      return {
       tools: [
         {
           name: 'github_get_pr_meta',
@@ -324,10 +353,18 @@ class CodeRabbitMCPServer {
           },
         },
       ],
-    }));
+    };
+    });
+    logger.info(`Registered ${26} tools`);
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
+      
+      logger.info(`Tool invocation: ${name}`, { 
+        tool: name,
+        hasArgs: !!args,
+        argsKeys: args ? Object.keys(args) : []
+      });
       
       try {
         switch (name) {
@@ -363,7 +400,9 @@ class CodeRabbitMCPServer {
           }
           
           case 'get_rate_limit_status': {
+            logger.debug('Executing get_rate_limit_status');
             const status = this.orchestrator.getRateLimitStatus();
+            logger.info('Rate limit status retrieved', status);
             return {
               content: [
                 {
@@ -375,6 +414,12 @@ class CodeRabbitMCPServer {
           }
           
           case 'apply_validated_fix': {
+            logger.info('Executing apply_validated_fix', {
+              repo: args?.repo,
+              pr: args?.prNumber,
+              threadId: args?.threadId,
+              filePath: args?.filePath
+            });
             const result = await this.orchestrator.applyValidatedFix(
               args?.repo as string,
               args?.prNumber as number,
@@ -383,6 +428,10 @@ class CodeRabbitMCPServer {
               args?.diffString as string,
               args?.commitMessage as string
             );
+            logger.info('Fix application result', {
+              success: result.success,
+              message: result.message
+            });
             return {
               content: [
                 {
@@ -394,6 +443,13 @@ class CodeRabbitMCPServer {
           }
           
           case 'run_orchestrator': {
+            logger.info('Executing run_orchestrator', {
+              repo: args?.repo,
+              pr: args?.prNumber,
+              maxIterations: args?.maxIterations,
+              dryRun: args?.dryRun,
+              validationMode: args?.validationMode
+            });
             const result = await this.orchestrator.run(
               args?.repo as string,
               args?.prNumber as number,
@@ -401,6 +457,13 @@ class CodeRabbitMCPServer {
               args?.dryRun as boolean,
               args?.validationMode as 'internal' | 'external'
             );
+            logger.info('Orchestrator run completed', {
+              success: result.success,
+              processed: result.processed,
+              resolved: result.resolved,
+              rejected: result.rejected,
+              needsReview: result.needsReview
+            });
             return {
               content: [
                 {
@@ -496,9 +559,13 @@ class CodeRabbitMCPServer {
             };
           }
             
-          default:
+          default: {
             // Delegate to individual tools
+            logger.debug(`Delegating tool ${name} to orchestrator`);
             const toolResult = await this.orchestrator.executeTool(name, args);
+            logger.debug(`Tool ${name} executed successfully`, {
+              hasResult: !!toolResult
+            });
             return {
               content: [
                 {
@@ -507,6 +574,7 @@ class CodeRabbitMCPServer {
                 },
               ],
             };
+          }
         }
       } catch (error) {
         logger.error(`Tool execution failed: ${name}`, error);
@@ -968,21 +1036,76 @@ class CodeRabbitMCPServer {
   }
 
   async start() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    logger.info('CodeRabbit MCP Server started');
+    logger.info('Starting MCP server with StdioServerTransport...');
+    
+    try {
+      const transport = new StdioServerTransport();
+      logger.debug('StdioServerTransport created');
+      
+      await this.server.connect(transport);
+      logger.info('✅ CodeRabbit MCP Server started successfully and listening on stdio');
+      logger.info('Server is ready to accept connections');
+      
+      // Log debug info about stdio
+      logger.debug('Server transport info', {
+        transportType: 'stdio',
+        processId: process.pid,
+        nodeVersion: process.version
+      });
+    } catch (error) {
+      logger.error('Failed to start MCP server', error);
+      throw error;
+    }
   }
 }
 
+// Enable file logging if specified
+if (process.env.MCP_LOG_FILE) {
+  Logger.enableFileLogging(process.env.MCP_LOG_FILE);
+  logger.info(`File logging enabled: ${process.env.MCP_LOG_FILE}`);
+}
+
 // Start server
+logger.info('=== CodeRabbit MCP Server Starting ===');
+logger.info('Environment:', {
+  nodeVersion: process.version,
+  platform: process.platform,
+  pid: process.pid,
+  logLevel: process.env.LOG_LEVEL || 'info',
+  logFile: process.env.MCP_LOG_FILE || 'none',
+  dryRun: process.env.DRY_RUN === 'true'
+});
+
 let server: CodeRabbitMCPServer;
 try {
   server = new CodeRabbitMCPServer();
 } catch (error) {
-  logger.error('Failed to initialize server', error);
+  logger.error('❌ Failed to initialize server', error);
   process.exit(1);
 }
+
 server.start().catch((error) => {
-  logger.error('Failed to start server', error);
+  logger.error('❌ Failed to start server', error);
+  process.exit(1);
+});
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  logger.info('Received SIGINT, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  logger.info('Received SIGTERM, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled rejection', reason, { promise });
   process.exit(1);
 });

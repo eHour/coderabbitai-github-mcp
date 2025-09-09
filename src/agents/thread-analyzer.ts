@@ -98,15 +98,16 @@ export class ThreadAnalyzerAgent {
     committableSuggestion?: string;
     aiPrompt?: string;
   } {
-    const body = thread.body;
+    const body = thread.body ?? '';
     
-    // Extract suggestion type from emoji or text
+    // Extract suggestion type from emoji or text (case-insensitive)
+    const lc = body.toLowerCase();
     let type = 'suggestion';
-    if (body.includes('🔧') || body.includes('Refactor')) type = 'refactor';
-    else if (body.includes('🐛') || body.includes('bug')) type = 'bug';
-    else if (body.includes('⚠️') || body.includes('warning')) type = 'warning';
-    else if (body.includes('🔒') || body.includes('security')) type = 'security';
-    else if (body.includes('⚡') || body.includes('performance')) type = 'performance';
+    if (body.includes('🛠️') || body.includes('🔧') || lc.includes('refactor')) type = 'refactor';
+    else if (body.includes('🐛') || lc.includes('bug')) type = 'bug';
+    else if (body.includes('⚠️') || lc.includes('warning')) type = 'warning';
+    else if (body.includes('🔒') || lc.includes('security') || lc.includes('vulnerability')) type = 'security';
+    else if (body.includes('⚡') || lc.includes('perf') || lc.includes('performance')) type = 'performance';
     
     // Extract code blocks
     const codeMatches = body.match(/```[\s\S]*?```/g) || [];
@@ -181,34 +182,37 @@ export class ThreadAnalyzerAgent {
     if (suggestion.type === 'security' || 
         suggestion.description.toLowerCase().includes('security') ||
         suggestion.description.toLowerCase().includes('vulnerability')) {
+      const patch = this.generatePatchFromSuggestion(suggestion);
       return {
         threadId: thread.id,
-        result: ValidationResult.VALID,
+        result: patch ? ValidationResult.VALID : ValidationResult.NEEDS_REVIEW,
         confidence: 0.9,
         reasoning: 'Security/critical issue',
-        patch: this.generatePatchFromSuggestion(suggestion),
+        patch,
       };
     }
     
     // Bug fixes are usually valid
     if (suggestion.type === 'bug') {
+      const patch = this.generatePatchFromSuggestion(suggestion);
       return {
         threadId: thread.id,
-        result: ValidationResult.VALID,
+        result: patch ? ValidationResult.VALID : ValidationResult.NEEDS_REVIEW,
         confidence: 0.8,
         reasoning: 'Bug fix suggestion',
-        patch: this.generatePatchFromSuggestion(suggestion),
+        patch,
       };
     }
     
     // Performance improvements are usually valid
     if (suggestion.type === 'performance') {
+      const patch = this.generatePatchFromSuggestion(suggestion);
       return {
         threadId: thread.id,
-        result: ValidationResult.VALID,
+        result: patch ? ValidationResult.VALID : ValidationResult.NEEDS_REVIEW,
         confidence: 0.7,
         reasoning: 'Performance improvement',
-        patch: this.generatePatchFromSuggestion(suggestion),
+        patch,
       };
     }
     
@@ -300,8 +304,10 @@ export class ThreadAnalyzerAgent {
 
     // Create a unified diff header
     const fileName = suggestion.file;
-    const startLine = suggestion.startLine || suggestion.line || 1;
-    const endLine = suggestion.line || startLine + 10; // Estimate if not provided
+    const startLine = Math.max(1, suggestion.startLine ?? suggestion.line ?? 1);
+    const newLines = newCode.split('\n');
+    const newCount = Math.max(1, newLines.length);
+    const oldCount = newCount; // best-effort; without context we assume replacement of same length
     
     // Build a simple unified diff
     // Note: This is a simplified version. In production, you'd want to:
@@ -311,8 +317,8 @@ export class ThreadAnalyzerAgent {
     const patch = [
       `--- a/${fileName}`,
       `+++ b/${fileName}`,
-      `@@ -${startLine},${endLine - startLine} +${startLine},${endLine - startLine} @@`,
-      ...newCode.split('\n').map(line => `+${line}`)
+      `@@ -${startLine},${oldCount} +${startLine},${newCount} @@`,
+      ...newLines.map(line => `+${line}`)
     ].join('\n');
 
     return patch;
@@ -355,13 +361,14 @@ export class ThreadAnalyzerAgent {
     // Build unified diff
     const fileName = suggestion.file;
     const startLine = suggestion.startLine || suggestion.line || 1;
-    const removedCount = removedLines.length || 1;
-    const addedCount = addedLines.length || 1;
+    const removedCount = Math.max(1, removedLines.length + contextLines.length);
+    const addedCount = Math.max(1, addedLines.length + contextLines.length);
 
     const patch = [
       `--- a/${fileName}`,
       `+++ b/${fileName}`,
       `@@ -${startLine},${removedCount} +${startLine},${addedCount} @@`,
+      ...contextLines.map(line => ` ${line}`),
       ...removedLines.map(line => `-${line}`),
       ...addedLines.map(line => `+${line}`)
     ].join('\n');

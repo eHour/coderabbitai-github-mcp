@@ -33,6 +33,39 @@ For development/testing, you can run the orchestrator directly:
 npx mcp-coderabbit test --repo owner/name --pr 123
 ```
 
+### Debugging Connection Issues
+
+If the MCP server fails to connect in Claude Code, enable file logging to diagnose:
+
+1. Configure environment variables in your Claude Code MCP settings:
+```json
+{
+  "mcpServers": {
+    "coderabbit": {
+      "command": "node",
+      "args": ["/path/to/mcp-coderabbit/dist/server.js"],
+      "env": {
+        "GITHUB_TOKEN": "your-token",
+        "LOG_LEVEL": "debug",
+        "MCP_LOG_FILE": "/tmp/coderabbit-mcp.log"
+      }
+    }
+  }
+}
+```
+
+2. Check the log file after attempting to connect:
+```bash
+tail -f /tmp/coderabbit-mcp.log
+```
+
+Common issues:
+- **Missing GITHUB_TOKEN**: Server requires GitHub authentication
+- **Wrong path**: Ensure server.js path is correct
+- **Node version**: Requires Node.js 18+ (check with `node --version`)
+- **Missing build**: Run `npm run build` if running from source
+- **Dependencies**: Run `npm install` in the project directory
+
 ## Prerequisites
 
 ### GitHub Authentication

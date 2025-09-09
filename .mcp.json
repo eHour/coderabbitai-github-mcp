@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "coderabbit": {
-      "command": "node",
-      "args": ["--enable-source-maps", "./dist/server.js"]
-    }
-  }
-}
